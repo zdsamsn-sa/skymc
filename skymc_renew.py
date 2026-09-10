@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SkyMC 免费服务器自动续期脚本 v6
-修复：密码输入框选择器 + JS 兜底填写
-目标：https://skymc.org/ → 登录 → 进入服务器面板 → 点击 Renew
+SkyMC 免费服务器自动续期脚本 v7
+重点强化 Cloudflare Turnstile 处理时机与重试
 """
 
 import os
@@ -12,7 +11,7 @@ import time
 import requests
 from seleniumbase import SB
 
-# ==================== 配置区域 ====================
+# ==================== 配置 ====================
 EMAIL = os.environ.get("SKYMC_EMAIL") or os.environ.get("EMAIL") or ""
 PASSWORD = os.environ.get("SKYMC_PASSWORD") or os.environ.get("PASSWORD") or ""
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
@@ -20,12 +19,11 @@ TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
 
 SERVER_URL = os.environ.get("SERVER_URL") or "https://skymc.org/en/server/TuUzR_dWxO2P"
 LOGIN_URL = "https://skymc.org/en/login"
-BASE_URL = "https://skymc.org/"
 
 IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
 PROXY_SERVER = os.environ.get("PROXY_SERVER") or "socks5://127.0.0.1:1080"
 REQUESTS_PROXIES = {"http": PROXY_SERVER, "https": PROXY_SERVER} if IS_PROXY else None
-# =================================================
+# ==============================================
 
 
 def send_tg(token, chat_id, message, image_path=None):
@@ -34,11 +32,10 @@ def send_tg(token, chat_id, message, image_path=None):
         return
     message = f"【SkyMC 续期】\n{message}"
     if image_path and os.path.exists(image_path):
-        url = f"https://api.telegram.org/bot{token}/sendPhoto"
         try:
             with open(image_path, "rb") as f:
                 resp = requests.post(
-                    url,
+                    f"https://api.telegram.org/bot{token}/sendPhoto",
                     data={"chat_id": chat_id, "caption": message},
                     files={"photo": f},
                     timeout=20,
@@ -47,16 +44,17 @@ def send_tg(token, chat_id, message, image_path=None):
             if resp.status_code == 200:
                 print("📨 Telegram 通知已发送（附带图片）")
                 return
-            print(f"⚠️ 带图发送失败，回退纯文字: {resp.text}")
         except Exception as e:
-            print(f"⚠️ 带图发送异常，回退纯文字: {e}")
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+            print(f"⚠️ 带图发送异常: {e}")
     try:
-        resp = requests.post(url, json={"chat_id": chat_id, "text": message}, timeout=10, proxies=REQUESTS_PROXIES)
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message},
+            timeout=10,
+            proxies=REQUESTS_PROXIES,
+        )
         if resp.status_code == 200:
             print("📨 Telegram 通知已发送（纯文字）")
-        else:
-            print(f"❌ Telegram 发送失败: {resp.text}")
     except Exception as e:
         print(f"❌ Telegram 发送异常: {e}")
 
@@ -71,30 +69,98 @@ def get_current_ip():
     return "获取失败"
 
 
-def handle_cloudflare(sb):
-    page_source = sb.get_page_source().lower()
-    if any(k in page_source for k in ["security verification", "verify you are human", "cf-turnstile", "turnstile"]):
-        print("🛡  检测到 Cloudflare Turnstile，尝试自动处理...")
+def is_cloudflare_present(sb):
+    """判断当前是否存在 Cloudflare 验证"""
+    try:
+        src = sb.get_page_source().lower()
+        keywords = [
+            "security verification",
+            "verify you are human",
+            "cf-turnstile",
+            "turnstile",
+            "challenges.cloudflare.com",
+            "cf-challenge",
+        ]
+        return any(k in src for k in keywords)
+    except:
+        return False
+
+
+def handle_cloudflare(sb, max_retry=3):
+    """更强力的 Cloudflare 处理"""
+    if not is_cloudflare_present(sb):
+        return True
+
+    print("🛡  检测到 Cloudflare 验证，开始处理...")
+
+    for i in range(max_retry):
+        print(f"   第 {i+1} 次尝试通过验证...")
+
+        # 方法1：官方推荐的 uc_gui_click_captcha
         try:
             sb.uc_gui_click_captcha()
-            print("✅ uc_gui_click_captcha 已执行")
-            time.sleep(4)
-            return True
-        except Exception as e:
-            print(f"⚠️ uc_gui_click_captcha 异常: {e}")
-            try:
-                sb.uc_click('input[type="checkbox"]', timeout=5)
-                print("✅ 备用 checkbox 点击完成")
-                time.sleep(3)
+            print("   ✅ uc_gui_click_captcha 已调用")
+            time.sleep(5)
+            if not is_cloudflare_present(sb):
+                print("   ✅ 验证已通过！")
                 return True
-            except:
-                pass
-            return False
-    return True
+        except Exception as e:
+            print(f"   uc_gui_click_captcha 异常: {e}")
+
+        # 方法2：直接点击 checkbox
+        try:
+            sb.uc_click('input[type="checkbox"]', timeout=4)
+            print("   ✅ 已点击 checkbox")
+            time.sleep(4)
+            if not is_cloudflare_present(sb):
+                print("   ✅ 验证已通过！")
+                return True
+        except:
+            pass
+
+        # 方法3：JS 点击可能的验证元素
+        try:
+            sb.execute_script("""
+                // 尝试点击 Turnstile 相关元素
+                const selectors = [
+                    'input[type="checkbox"]',
+                    '.cf-turnstile',
+                    '#cf-turnstile',
+                    'label',
+                    '[data-sitekey]',
+                    'iframe'
+                ];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        el.click();
+                    }
+                }
+                // 尝试点击 iframe 内
+                const iframes = document.querySelectorAll('iframe');
+                iframes.forEach(iframe => {
+                    try {
+                        const doc = iframe.contentDocument || iframe.contentWindow.document;
+                        const cb = doc.querySelector('input[type="checkbox"]');
+                        if (cb) cb.click();
+                    } catch(e) {}
+                });
+            """)
+            print("   ✅ JS 点击已执行")
+            time.sleep(4)
+            if not is_cloudflare_present(sb):
+                print("   ✅ 验证已通过！")
+                return True
+        except Exception as e:
+            print(f"   JS 点击异常: {e}")
+
+        time.sleep(2)
+
+    print("   ❌ Cloudflare 验证未能自动通过")
+    return False
 
 
 def fill_input_js(sb, value, is_password=False):
-    """用 JS 强制填写输入框（最强兜底）"""
     js_code = f"""
     const inputs = document.querySelectorAll('input');
     for (let input of inputs) {{
@@ -102,40 +168,33 @@ def fill_input_js(sb, value, is_password=False):
         const placeholder = (input.placeholder || '').toLowerCase();
         const name = (input.name || '').toLowerCase();
         const id = (input.id || '').toLowerCase();
-        
         const isPwd = type === 'password' || name.includes('pass') || id.includes('pass') || placeholder.includes('password');
         
         if ({str(is_password).lower()}) {{
-            // 找密码框
             if (isPwd && input.offsetParent !== null) {{
                 input.focus();
                 input.value = '';
                 input.value = `{value}`;
                 input.dispatchEvent(new Event('input', {{ bubbles: true }}));
                 input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-                return 'password';
+                return true;
             }}
         }} else {{
-            // 找邮箱/用户名框
             if (!isPwd && type !== 'hidden' && type !== 'submit' && type !== 'checkbox' && type !== 'radio' && input.offsetParent !== null) {{
                 input.focus();
                 input.value = '';
                 input.value = `{value}`;
                 input.dispatchEvent(new Event('input', {{ bubbles: true }}));
                 input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-                return 'email';
+                return true;
             }}
         }}
     }}
-    return null;
+    return false;
     """
     try:
-        result = sb.execute_script(js_code)
-        return result is not None
-    except Exception as e:
-        print(f"   JS 填写异常: {e}")
+        return sb.execute_script(js_code)
+    except:
         return False
 
 
@@ -145,41 +204,32 @@ def login(sb, email, password):
     sb.wait_for_ready_state_complete()
     time.sleep(3)
 
+    # 1. 打开页面后先处理可能的验证
     handle_cloudflare(sb)
     time.sleep(1)
 
-    # ========== 填写邮箱 ==========
+    # 2. 填写邮箱
     print("📧 填写邮箱/用户名...")
     email_filled = False
-
-    # 方法1：常规选择器
-    email_selectors = [
+    for sel in [
         'input[placeholder*="Username or Email" i]',
         'input[placeholder*="Email" i]',
-        'input[placeholder*="Username" i]',
         'input[type="email"]',
-        'input[name="email"]',
-        'input[name="username"]',
         'input[type="text"]',
-    ]
-    for sel in email_selectors:
+    ]:
         try:
             if sb.is_element_visible(sel, timeout=2):
                 sb.clear(sel)
                 sb.type(sel, email, timeout=6)
                 email_filled = True
-                print(f"   ✅ 邮箱已填写（选择器: {sel}）")
+                print(f"   ✅ 邮箱已填写（{sel}）")
                 break
         except:
             continue
-
-    # 方法2：JS 兜底
     if not email_filled:
-        print("   尝试 JS 方式填写邮箱...")
         if fill_input_js(sb, email, is_password=False):
             email_filled = True
             print("   ✅ 通过 JS 填写邮箱成功")
-
     if not email_filled:
         print("❌ 无法找到邮箱输入框")
         sb.save_screenshot("login_failed.png")
@@ -187,132 +237,78 @@ def login(sb, email, password):
 
     time.sleep(0.8)
 
-    # ========== 填写密码 ==========
+    # 3. 填写密码
     print("🔑 填写密码...")
     password_filled = False
-
-    # 方法1：常规选择器
-    password_selectors = [
-        'input[type="password"]',
-        'input[name="password"]',
-        'input[placeholder*="Password" i]',
-        'input[placeholder*="密码"]',
-        'input[id*="password" i]',
-        'input[id*="pass" i]',
-    ]
-    for sel in password_selectors:
+    for sel in ['input[type="password"]', 'input[name="password"]']:
         try:
             if sb.is_element_visible(sel, timeout=2):
                 sb.clear(sel)
                 sb.type(sel, password, timeout=6)
                 password_filled = True
-                print(f"   ✅ 密码已填写（选择器: {sel}）")
+                print(f"   ✅ 密码已填写（{sel}）")
                 break
-        except Exception as e:
+        except:
             continue
-
-    # 方法2：JS 兜底（重点加强）
     if not password_filled:
-        print("   尝试 JS 方式填写密码...")
         if fill_input_js(sb, password, is_password=True):
             password_filled = True
             print("   ✅ 通过 JS 填写密码成功")
-
-    # 方法3：再试一次 Selenium 原生
-    if not password_filled:
-        try:
-            print("   最后尝试 Selenium 原生 password 定位...")
-            elements = sb.find_elements('input[type="password"]')
-            if elements:
-                elements[0].clear()
-                elements[0].send_keys(password)
-                password_filled = True
-                print("   ✅ 原生方式填写密码成功")
-        except Exception as e:
-            print(f"   原生方式失败: {e}")
-
     if not password_filled:
         print("❌ 无法找到密码输入框")
         sb.save_screenshot("login_failed.png")
-        try:
-            # 打印所有 input 信息帮助调试
-            info = sb.execute_script("""
-                const inputs = document.querySelectorAll('input');
-                let result = [];
-                inputs.forEach((inp, i) => {
-                    result.push({
-                        index: i,
-                        type: inp.type,
-                        name: inp.name,
-                        id: inp.id,
-                        placeholder: inp.placeholder,
-                        visible: inp.offsetParent !== null
-                    });
-                });
-                return JSON.stringify(result, null, 2);
-            """)
-            print("页面所有 input 元素信息:\n", info)
-        except:
-            pass
         return False
 
     time.sleep(1)
 
-    # 再次处理可能出现的验证
+    # 4. 填完后再处理一次验证（有时验证在填完后才出现）
     handle_cloudflare(sb)
     time.sleep(2)
 
     print("⏳ 等待验证 token 生效...")
-    time.sleep(2)
+    time.sleep(3)
 
-    # ========== 点击登录 ==========
-    for attempt in range(4):
+    # 5. 点击登录 + 登录后再次处理验证
+    for attempt in range(5):
         print(f"🔑 点击登录按钮...(第 {attempt + 1} 次)")
-        clicked = False
 
-        for sel in ['button:contains("Login")', 'button[type="submit"]', 'button:contains("Sign in")', 'button:contains("Log in")']:
-            try:
-                if sb.is_element_visible(sel, timeout=2):
-                    sb.uc_click(sel)
-                    clicked = True
-                    print(f"   使用选择器点击: {sel}")
-                    break
-            except:
-                continue
-
-        if not clicked:
+        # 点击登录
+        try:
+            sb.uc_click('button:contains("Login")')
+        except:
             try:
                 sb.execute_script("""
                     const btns = document.querySelectorAll('button');
                     for (let b of btns) {
-                        const t = (b.innerText || b.textContent || '').toLowerCase();
-                        if (t.includes('login') || t.includes('sign in') || t.includes('log in')) {
-                            b.click(); return true;
+                        const t = (b.innerText || '').toLowerCase();
+                        if (t.includes('login') || t.includes('sign in')) {
+                            b.click(); return;
                         }
                     }
-                    const submit = document.querySelector('button[type="submit"]');
-                    if (submit) { submit.click(); return true; }
-                    return false;
+                    const s = document.querySelector('button[type="submit"]');
+                    if (s) s.click();
                 """)
-                clicked = True
-                print("   通过 JS 点击登录")
-            except Exception as e:
-                print(f"   JS 点击失败: {e}")
+            except:
+                pass
 
-        # 等待跳转
-        for _ in range(12):
+        time.sleep(3)
+
+        # 关键：点击登录后立刻检查并处理 Cloudflare
+        if is_cloudflare_present(sb):
+            print("   点击登录后出现验证，正在处理...")
+            handle_cloudflare(sb, max_retry=4)
+            time.sleep(3)
+
+        # 检查是否已跳转
+        for _ in range(8):
             current_url = sb.get_current_url()
             if "login" not in current_url.lower():
                 print(f"✅ 登录成功！当前页面: {current_url}")
                 return True
+            # 中途如果又出现验证，再处理一次
+            if is_cloudflare_present(sb):
+                handle_cloudflare(sb, max_retry=2)
             time.sleep(1)
-
-        try:
-            for sel in ['.alert-danger', '[role="alert"]', '.text-danger', '.error']:
-                if sb.is_element_visible(sel, timeout=1):
-                    print(f"❌ 页面错误提示: {sb.get_text(sel)}")
-        except:
-            pass
 
         print("⚠️ 未跳转成功，准备重试...")
         time.sleep(2)
@@ -327,6 +323,9 @@ def click_renew(sb):
     sb.open(SERVER_URL)
     sb.wait_for_ready_state_complete()
     time.sleep(4)
+
+    # 面板也可能触发验证
+    handle_cloudflare(sb)
 
     print("🔍 查找 Renew 按钮...")
     for sel in ['button:contains("Renew")', 'button:contains("续期")']:
@@ -369,7 +368,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v6")
+    print("🚀 启动 SkyMC 自动续期脚本 v7")
     print(f"目标服务器: {SERVER_URL}")
 
     current_ip = get_current_ip()
@@ -387,7 +386,7 @@ def main():
     with SB(**sb_kwargs) as sb:
         success = login(sb, EMAIL, PASSWORD)
         if not success:
-            msg = f"❌ 登录失败\nIP: {current_ip}\n请检查账号密码或 Cloudflare 验证情况"
+            msg = f"❌ 登录失败（大概率是 Cloudflare 验证未通过）\nIP: {current_ip}"
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="login_failed.png")
             return
@@ -401,12 +400,12 @@ def main():
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="renew_success.png")
             print(msg)
         else:
-            msg = f"❌ 续期失败，未找到 Renew 按钮\n可能刚续期过或页面结构变化\nIP: {current_ip}"
+            msg = f"❌ 续期失败，未找到 Renew 按钮\nIP: {current_ip}"
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="renew_not_found.png")
             print(msg)
 
         sb.save_screenshot("final_result.png")
-        print("📸 最终截图已保存: final_result.png")
+        print("📸 最终截图已保存")
 
     print("🏁 脚本执行完毕")
 

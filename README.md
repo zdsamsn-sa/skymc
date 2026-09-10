@@ -1,12 +1,11 @@
-# SkyMC 自动续期工具 v6
+# SkyMC 自动续期工具 v7
 
-## 本次修复
-- 强化密码输入框定位（多种选择器 + JS 强制填写）
-- 邮箱填写也同步加强
-- 登录按钮点击增加重试与 JS 兜底
+## 本次重点改进
+- 在**打开页面后、填写完成后、点击登录后**三个时机都检测并处理 Cloudflare
+- `handle_cloudflare` 增加多次重试 + 多种点击方式
+- 登录循环中持续检测验证弹窗
 
-## Secrets 配置
-- `SKYMC_EMAIL`
-- `SKYMC_PASSWORD`
-- `TG_BOT_TOKEN`（推荐）
-- `TG_CHAT_ID`（推荐）
+## 现实说明
+即使使用 SeleniumBase UC + `uc_gui_click_captcha`，在 GitHub Actions 的 Xvfb 环境下，Cloudflare Turnstile 仍有一定概率无法通过。
+
+**强烈建议同时启用提醒工作流作为保底。**
