@@ -1,54 +1,57 @@
-# SkyMC 免费服务器自动续期工具 v3
+# SkyMC 免费服务器自动续期工具 v4
 
-针对服务器 `TuUzR_dWxO2P`（zdsa.skymc.io）
+参考 therose.py，使用 **SeleniumBase UC 模式 + `uc_gui_click_captcha()`** 处理 Cloudflare Turnstile。
 
-## 本版本更新
+## 核心改进
 
-- **新增 Cloudflare「Verify you are human」模拟点击**
-  - 自动检测验证框
-  - 模拟鼠标移动 + 点击
-  - 支持 iframe 内点击
-  - 等待验证结果并截图发送到 Telegram
-- 隐藏 webdriver 特征，降低被检测概率
-- 成功 / 失败都会发送带截图的 Telegram 通知
+- 使用 `seleniumbase` 的 `uc=True`（undetected-chromedriver）
+- 调用 `sb.uc_gui_click_captcha()` 专门处理 Turnstile 验证
+- GitHub Actions 中配合 **Xvfb 虚拟显示**，让 GUI 点击能正常工作
+- 成功/失败都会发送带截图的 Telegram 通知
 
 ## 文件说明
 
-| 文件 | 推荐度 | 说明 |
-|------|--------|------|
-| `skymc_remind.py` | ★★★★★ | 纯提醒 + Telegram（最稳定，推荐） |
-| `skymc_renew.py` | ★★★☆☆ | 自动登录 + 模拟点击 Cloudflare + 点击 Renew |
-| `.github/workflows/skymc-remind.yml` | 推荐 | 定时提醒 |
-| `.github/workflows/skymc-renew.yml` | 实验 | 自动点击（已增强 Cloudflare 处理） |
+| 文件 | 说明 |
+|------|------|
+| `skymc_renew.py` | 主脚本（自动登录 + 处理验证 + 点击 Renew） |
+| `skymc_remind.py` | 纯提醒脚本（备用，100% 稳定） |
+| `.github/workflows/skymc-renew.yml` | 自动续期工作流（含 Xvfb） |
+| `.github/workflows/skymc-remind.yml` | 提醒工作流 |
 
 ## 使用方法
 
-### 1. 获取 Telegram 配置
+### 1. 设置 Secrets
 
-1. 找 `@BotFather` 创建机器人 → 拿到 **Token**
-2. 给你的机器人发任意消息
-3. 打开：`https://api.telegram.org/bot你的Token/getUpdates`
-4. 找到 `"chat":{"id": 数字}` → 这就是 **Chat ID**
+| Secret | 必须 | 说明 |
+|--------|------|------|
+| `SKYMC_EMAIL` | 是 | 登录邮箱 |
+| `SKYMC_PASSWORD` | 是 | 登录密码 |
+| `TG_BOT_TOKEN` | 推荐 | Telegram Bot Token |
+| `TG_CHAT_ID` | 推荐 | Telegram Chat ID |
 
-### 2. 设置 GitHub Secrets
+### 2. 上传代码
 
-| Secret 名称 | 是否必须 | 说明 |
-|-------------|---------|------|
-| `TG_BOT_TOKEN` | 是 | Telegram Bot Token |
-| `TG_CHAT_ID` | 是 | 你的 Chat ID |
-| `SKYMC_EMAIL` | 仅自动点击需要 | 登录邮箱 |
-| `SKYMC_PASSWORD` | 仅自动点击需要 | 登录密码 |
+把本文件夹内容推送到 GitHub 仓库即可。
 
-### 3. 上传并运行
+### 3. 本地测试（推荐先测）
 
-把整个文件夹内容推送到 GitHub 仓库即可。
+```bash
+pip install -r requirements.txt
 
-- 提醒方案默认每 **6 小时**运行一次
-- 自动点击方案默认每 **8 小时**运行一次
+export SKYMC_EMAIL="你的邮箱"
+export SKYMC_PASSWORD="你的密码"
+export TG_BOT_TOKEN="可选"
+export TG_CHAT_ID="可选"
+
+# 本地直接运行（有图形界面时效果最好）
+python skymc_renew.py
+```
 
 ## 注意事项
 
-1. Cloudflare 验证越来越严格，即使加了模拟点击，**成功率仍然无法保证 100%**。
-2. 如果自动点击连续失败，请优先使用提醒方案，手动点一次 Renew 即可。
-3. 建议把提醒和自动点击同时启用，互为备份。
-4. 账号密码务必使用 Secrets，不要写在代码里。
+1. `uc_gui_click_captcha()` 需要图形环境，GitHub Actions 已通过 Xvfb 解决。
+2. 即使使用了 UC 模式，Cloudflare 仍可能偶尔拦截，因此保留了提醒方案作为备份。
+3. 建议同时启用两个工作流：
+   - 自动续期每 8 小时尝试一次
+   - 提醒每 6 小时发一次，确保不会漏掉
+4. 如果连续失败，请检查 Actions 日志和上传的截图。

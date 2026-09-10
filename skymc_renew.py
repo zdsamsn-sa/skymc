@@ -1,341 +1,291 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SkyMC 免费服务器自动续期脚本 v3
-增加：模拟点击 Cloudflare「Verify you are human」验证
+SkyMC 免费服务器自动续期脚本 v4
+参考 therose.py，使用 SeleniumBase UC 模式 + uc_gui_click_captcha 处理 Cloudflare Turnstile
 """
 
 import os
-import time
 import sys
-import random
+import time
 import requests
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from seleniumbase import SB
 
 # ==================== 配置区域 ====================
-EMAIL = os.getenv("SKYMC_EMAIL", "你的邮箱@example.com")
-PASSWORD = os.getenv("SKYMC_PASSWORD", "你的密码")
-SERVER_URL = "https://skymc.org/en/server/TuUzR_dWxO2P"
-HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
+EMAIL = os.environ.get("SKYMC_EMAIL") or os.environ.get("EMAIL") or ""
+PASSWORD = os.environ.get("SKYMC_PASSWORD") or os.environ.get("PASSWORD") or ""
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
 
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
+SERVER_URL = os.environ.get("SERVER_URL") or "https://skymc.org/en/server/TuUzR_dWxO2P"
+LOGIN_URL = "https://skymc.org/en/login"
+
+# 是否使用代理
+IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
+PROXY_SERVER = os.environ.get("PROXY_SERVER") or "socks5://127.0.0.1:1080"
+REQUESTS_PROXIES = {"http": PROXY_SERVER, "https": PROXY_SERVER} if IS_PROXY else None
 # =================================================
 
 
-def send_telegram(text: str, photo_path: str = None):
-    if not TG_BOT_TOKEN or not TG_CHAT_ID:
-        print("⚠️  未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过 Telegram 通知")
-        return False
+def send_tg(token, chat_id, message, image_path=None):
+    """发送 Telegram 通知（支持图片）"""
+    if not token or not chat_id:
+        print("⚠️  未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过通知")
+        return
+
+    message = f"【SkyMC 续期】\n{message}"
+
+    if image_path and os.path.exists(image_path):
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
+        try:
+            with open(image_path, "rb") as f:
+                resp = requests.post(
+                    url,
+                    data={"chat_id": chat_id, "caption": message},
+                    files={"photo": f},
+                    timeout=20,
+                    proxies=REQUESTS_PROXIES,
+                )
+            if resp.status_code == 200:
+                print(f"📨 Telegram 通知已发送（附带图片）")
+                return
+            else:
+                print(f"⚠️ 带图发送失败，回退纯文字: {resp.text}")
+        except Exception as e:
+            print(f"⚠️ 带图发送异常，回退纯文字: {e}")
+
+    # 纯文字回退
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        if photo_path and os.path.exists(photo_path):
-            url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendPhoto"
-            with open(photo_path, "rb") as f:
-                files = {"photo": f}
-                data = {"chat_id": TG_CHAT_ID, "caption": text, "parse_mode": "HTML"}
-                resp = requests.post(url, data=data, files=files, timeout=30)
-        else:
-            url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": TG_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True
-            }
-            resp = requests.post(url, json=payload, timeout=15)
+        resp = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": message},
+            timeout=10,
+            proxies=REQUESTS_PROXIES,
+        )
         if resp.status_code == 200:
-            print("✅ Telegram 通知发送成功")
-            return True
+            print("📨 Telegram 通知已发送（纯文字）")
         else:
-            print(f"❌ Telegram 发送失败: {resp.status_code} - {resp.text}")
-            return False
+            print(f"❌ Telegram 发送失败: {resp.text}")
     except Exception as e:
         print(f"❌ Telegram 发送异常: {e}")
-        return False
 
 
-def human_delay(min_s=0.3, max_s=1.2):
-    time.sleep(random.uniform(min_s, max_s))
+def get_current_ip():
+    try:
+        resp = requests.get("https://api.ip.sb/ip", proxies=REQUESTS_PROXIES, timeout=10)
+        if resp.status_code == 200:
+            return resp.text.strip()
+    except:
+        pass
+    return "获取失败"
 
 
-def try_click_cloudflare(page):
-    """尝试模拟点击 Cloudflare 验证框"""
-    print("🛡️  检测到 Cloudflare 验证，尝试模拟点击...")
+def login(sb, email, password):
+    """登录流程（重点处理 Cloudflare Turnstile）"""
+    print("🌐 打开登录页面...")
+    sb.open(LOGIN_URL)
+    sb.wait_for_ready_state_complete()
+    time.sleep(2)
 
-    # 多种可能的选择器
-    selectors = [
-        'input[type="checkbox"]',
-        '#cf-turnstile',
-        'iframe[src*="challenges.cloudflare.com"]',
-        'iframe[src*="turnstile"]',
-        '.cf-turnstile',
-        '[data-sitekey]',
-        'label:has-text("Verify you are human")',
-        'div:has-text("Verify you are human")',
-        'span:has-text("Verify you are human")',
-        'label.cb-lb',
-        '#challenge-stage',
-        'input[name="cf-turnstile-response"]',
-    ]
-
-    clicked = False
-
-    # 1. 尝试直接点击 checkbox
-    for sel in selectors:
+    # 检测是否出现 Cloudflare 验证
+    page_source = sb.get_page_source().lower()
+    if "security verification" in page_source or "verify you are human" in page_source or "cf-turnstile" in page_source:
+        print("🛡  检测到 Cloudflare Turnstile，尝试自动处理...")
         try:
-            loc = page.locator(sel).first
-            if loc.count() > 0 and loc.is_visible(timeout=3000):
-                print(f"   找到元素: {sel}")
-                # 模拟人类鼠标移动再点击
-                box = loc.bounding_box()
-                if box:
-                    page.mouse.move(
-                        box["x"] + box["width"] / 2 + random.uniform(-5, 5),
-                        box["y"] + box["height"] / 2 + random.uniform(-5, 5)
-                    )
-                    human_delay(0.2, 0.6)
-                loc.click(timeout=5000, force=True)
-                clicked = True
-                print("   ✅ 已尝试点击验证框")
-                break
+            # 核心方法：使用 SeleniumBase 的 UC GUI 点击验证
+            sb.uc_gui_click_captcha()
+            print("✅ uc_gui_click_captcha 已执行")
+            time.sleep(3)
         except Exception as e:
-            continue
-
-    # 2. 如果有 iframe，尝试进入 iframe 点击
-    if not clicked:
-        try:
-            frames = page.frames
-            for frame in frames:
-                if "cloudflare" in frame.url or "turnstile" in frame.url or "challenges" in frame.url:
-                    print(f"   进入 Cloudflare iframe: {frame.url[:60]}...")
-                    try:
-                        checkbox = frame.locator('input[type="checkbox"], .cb-lb, body').first
-                        if checkbox.count() > 0:
-                            checkbox.click(timeout=5000, force=True)
-                            clicked = True
-                            print("   ✅ 已在 iframe 内点击")
-                            break
-                    except:
-                        # 尝试点击 iframe 中心
-                        try:
-                            frame.click("body", timeout=3000)
-                            clicked = True
-                            print("   ✅ 已点击 iframe body")
-                            break
-                        except:
-                            pass
-        except Exception as e:
-            print(f"   iframe 处理异常: {e}")
-
-    # 3. 等待验证结果
-    if clicked:
-        print("   等待 Cloudflare 验证结果（最多 15 秒）...")
-        for i in range(15):
-            time.sleep(1)
-            content = page.content().lower()
-            if "security verification" not in content and "verify you are human" not in content:
-                print("   ✅ Cloudflare 验证似乎已通过！")
-                return True
-            # 有时会出现成功提示
-            if "success" in content or "verified" in content:
-                print("   ✅ 检测到验证成功标志")
-                return True
-        print("   ⚠️  等待超时，验证可能未通过")
-        return False
-    else:
-        print("   ❌ 未找到可点击的验证元素")
-        return False
-
-
-def renew_server():
-    print("=" * 55)
-    print("SkyMC 免费服务器自动续期脚本 v3")
-    print(f"目标服务器：{SERVER_URL}")
-    print("=" * 55)
-
-    with sync_playwright() as p:
-        # 使用更真实的启动参数，降低被检测概率
-        browser = p.chromium.launch(
-            headless=HEADLESS,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,800",
-            ]
-        )
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            locale="en-US",
-            timezone_id="Asia/Shanghai",
-            java_script_enabled=True,
-        )
-
-        # 隐藏 webdriver 特征
-        page = context.new_page()
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = { runtime: {} };
-        """)
-
-        try:
-            # 1. 打开登录页
-            print("\n[1/6] 正在打开登录页面...")
-            page.goto("https://skymc.org/en/login", timeout=60000, wait_until="domcontentloaded")
-            human_delay(2, 4)
-
-            # 2. 检测并处理 Cloudflare
-            content = page.content().lower()
-            if "security verification" in content or "verify you are human" in content or "cf-turnstile" in content:
-                page.screenshot(path="cloudflare_before.png")
-                success = try_click_cloudflare(page)
-                page.screenshot(path="cloudflare_after.png")
-
-                if not success:
-                    send_telegram(
-                        "❌ <b>SkyMC 自动续期失败</b>\n\nCloudflare 验证未能自动通过。\n请手动登录面板点击 Renew。\n\n面板：https://skymc.org/en/server/TuUzR_dWxO2P",
-                        "cloudflare_after.png"
-                    )
-                    print("❌ Cloudflare 验证失败，终止脚本")
-                    sys.exit(1)
-                human_delay(2, 3)
-
-            # 3. 输入账号密码
-            print("[2/6] 正在输入账号密码...")
-            email_selectors = [
-                'input[type="email"]',
-                'input[name="email"]',
-                'input[placeholder*="Email" i]',
-                'input[placeholder*="Username" i]',
-                'input[type="text"]'
-            ]
-            password_selectors = [
-                'input[type="password"]',
-                'input[name="password"]'
-            ]
-
-            email_filled = False
-            for sel in email_selectors:
-                try:
-                    if page.locator(sel).count() > 0:
-                        page.fill(sel, EMAIL, timeout=5000)
-                        email_filled = True
-                        human_delay()
-                        break
-                except:
-                    continue
-            if not email_filled:
-                raise Exception("无法找到邮箱输入框")
-
-            for sel in password_selectors:
-                try:
-                    if page.locator(sel).count() > 0:
-                        page.fill(sel, PASSWORD, timeout=5000)
-                        human_delay()
-                        break
-                except:
-                    continue
-
-            # 4. 点击登录
-            print("[3/6] 正在点击登录...")
-            login_selectors = [
-                'button:has-text("Login")',
-                'button:has-text("Sign in")',
-                'button:has-text("Log in")',
-                'button[type="submit"]'
-            ]
-            clicked = False
-            for sel in login_selectors:
-                try:
-                    if page.locator(sel).count() > 0:
-                        page.click(sel, timeout=5000)
-                        clicked = True
-                        break
-                except:
-                    continue
-            if not clicked:
-                raise Exception("无法找到登录按钮")
-
-            page.wait_for_load_state("networkidle", timeout=30000)
-            human_delay(3, 5)
-
-            # 再次检查是否还在验证或登录页
-            content = page.content().lower()
-            current_url = page.url.lower()
-            if "security verification" in content or "verify you are human" in content:
-                print("⚠️  登录后仍出现 Cloudflare 验证，再次尝试...")
-                try_click_cloudflare(page)
-                human_delay(3, 5)
-                content = page.content().lower()
-
-            if "login" in current_url and ("security verification" in content or "verify you are human" in content):
-                page.screenshot(path="login_failed.png")
-                send_telegram(
-                    "⚠️ <b>SkyMC 自动续期 - 登录失败</b>\n\n可能原因：\n1. 账号密码错误\n2. Cloudflare 验证未通过\n\n请手动登录：https://skymc.org/en/server/TuUzR_dWxO2P",
-                    "login_failed.png"
-                )
-                print("已保存截图：login_failed.png")
-                sys.exit(1)
-
-            # 5. 进入服务器面板
-            print("[4/6] 正在进入服务器面板...")
-            page.goto(SERVER_URL, timeout=60000, wait_until="domcontentloaded")
-            human_delay(2, 4)
-
-            # 6. 点击 Renew
-            print("[5/6] 正在查找并点击 Renew 按钮...")
-            renew_selectors = [
-                'button:has-text("Renew")',
-                'button:has-text("续期")',
-                'button >> text=/Renew/i'
-            ]
-
-            renew_clicked = False
-            for sel in renew_selectors:
-                try:
-                    locator = page.locator(sel).first
-                    if locator.is_visible(timeout=8000):
-                        locator.click()
-                        renew_clicked = True
-                        print("✅ 成功点击 Renew 按钮！")
-                        break
-                except:
-                    continue
-
-            print("[6/6] 处理结果...")
-            if renew_clicked:
-                human_delay(2, 3)
-                page.screenshot(path="renew_success.png")
-                send_telegram(
-                    "✅ <b>SkyMC 自动续期成功</b>\n\n已成功点击 Renew 按钮。\n服务器：TuUzR_dWxO2P",
-                    "renew_success.png"
-                )
-                print("✅ 续期成功，截图已发送到 Telegram")
-            else:
-                print("❌ 未找到 Renew 按钮")
-                page.screenshot(path="renew_not_found.png")
-                send_telegram(
-                    "❌ <b>SkyMC 自动续期 - 未找到 Renew 按钮</b>\n\n可能原因：\n1. 刚刚已经续期过\n2. 页面结构变化\n3. 需要先启动服务器\n\n请手动检查：https://skymc.org/en/server/TuUzR_dWxO2P",
-                    "renew_not_found.png"
-                )
-                print("已保存截图：renew_not_found.png")
-
-        except Exception as e:
-            print(f"\n❌ 发生错误：{e}")
+            print(f"⚠️ uc_gui_click_captcha 执行异常: {e}")
+            # 备用：尝试普通点击
             try:
-                page.screenshot(path="error.png")
-                send_telegram(f"❌ <b>SkyMC 自动续期异常</b>\n\n错误信息：{e}", "error.png")
+                sb.uc_click('input[type="checkbox"]', timeout=5)
+                print("✅ 备用 checkbox 点击已执行")
+                time.sleep(2)
             except:
                 pass
-            sys.exit(1)
-        finally:
-            browser.close()
+
+    print("📧 填写邮箱...")
+    # 尝试多种选择器
+    email_filled = False
+    for sel in ['input[type="email"]', 'input[name="email"]', 'input[placeholder*="Email" i]', 'input[placeholder*="Username" i]', 'input[type="text"]']:
+        try:
+            if sb.is_element_visible(sel, timeout=3):
+                sb.type(sel, email, timeout=8)
+                email_filled = True
+                print(f"   使用选择器: {sel}")
+                break
+        except:
+            continue
+    if not email_filled:
+        print("❌ 无法找到邮箱输入框")
+        sb.save_screenshot("login_failed.png")
+        return False
+
+    print("🔑 填写密码...")
+    try:
+        sb.type('input[type="password"]', password, timeout=8)
+    except Exception as e:
+        print(f"❌ 填写密码失败: {e}")
+        sb.save_screenshot("login_failed.png")
+        return False
+
+    time.sleep(1)
+
+    # 再次检查是否有验证（有时验证出现在填完账号后）
+    page_source = sb.get_page_source().lower()
+    if "verify you are human" in page_source or "security verification" in page_source:
+        print("🛡  再次检测到验证，尝试处理...")
+        try:
+            sb.uc_gui_click_captcha()
+            print("✅ 第二次验证处理完成")
+            time.sleep(3)
+        except Exception as e:
+            print(f"⚠️ 第二次验证处理异常: {e}")
+
+    print("⏳ 等待验证 token 生效...")
+    time.sleep(2)
+
+    # 点击登录（带重试）
+    for attempt in range(3):
+        print(f"🔑 点击登录按钮...(第 {attempt + 1} 次)")
+        try:
+            sb.uc_click('button:contains("Login")')
+        except:
+            try:
+                sb.uc_click('button[type="submit"]')
+            except Exception as e:
+                print(f"⚠️ 点击登录异常: {e}")
+
+        # 等待跳转
+        for _ in range(8):
+            current_url = sb.get_current_url()
+            if "login" not in current_url.lower() and "skymc.org" in current_url:
+                print(f"✅ 登录成功，当前页面: {current_url}")
+                return True
+            time.sleep(1)
+
+        # 检查错误提示
+        try:
+            for sel in ['.alert-danger', 'div[role="alert"]', '.text-danger', '.error']:
+                if sb.is_element_visible(sel, timeout=1):
+                    err_text = sb.get_text(sel)
+                    print(f"❌ 登录错误提示: {err_text}")
+        except:
+            pass
+
+        print("⚠️ 未跳转成功，准备重试...")
+
+    print(f"❌ 登录失败，当前 URL: {sb.get_current_url()}")
+    sb.save_screenshot("login_failed.png")
+    return False
+
+
+def click_renew(sb):
+    """点击 Renew 按钮"""
+    print("📄 进入服务器面板...")
+    sb.open(SERVER_URL)
+    sb.wait_for_ready_state_complete()
+    time.sleep(3)
+
+    print("🔍 查找 Renew 按钮...")
+    renew_selectors = [
+        'button:contains("Renew")',
+        'button:contains("续期")',
+        'button >> text=/Renew/i',
+        '//button[contains(text(),"Renew")]',
+    ]
+
+    for sel in renew_selectors:
+        try:
+            if sb.is_element_visible(sel, timeout=4):
+                print(f"✅ 找到 Renew 按钮: {sel}")
+                sb.uc_click(sel)
+                print("✅ 已点击 Renew")
+                time.sleep(3)
+                return True
+        except:
+            continue
+
+    # JS 兜底
+    try:
+        result = sb.execute_script("""
+            const buttons = document.querySelectorAll('button');
+            for (let btn of buttons) {
+                const text = (btn.innerText || btn.textContent || '').toLowerCase();
+                if (text.includes('renew') || text.includes('续期')) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        """)
+        if result:
+            print("✅ 通过 JavaScript 点击 Renew 成功")
+            time.sleep(3)
+            return True
+    except Exception as e:
+        print(f"⚠️ JS 点击失败: {e}")
+
+    print("❌ 未找到 Renew 按钮")
+    sb.save_screenshot("renew_not_found.png")
+    return False
+
+
+def main():
+    if not EMAIL or not PASSWORD:
+        print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
+        sys.exit(1)
+
+    print("🚀 启动 SkyMC 自动续期脚本 v4 (SeleniumBase UC 模式)")
+    print(f"目标服务器: {SERVER_URL}")
+
+    current_ip = get_current_ip()
+    print(f"🎯 当前出口 IP: {current_ip}")
+
+    # UC 模式 + 非无头（验证需要可视化环境）
+    # 在 GitHub Actions 上配合 xvfb 使用
+    sb_kwargs = {
+        "uc": True,           # 关键 undetected-chromedriver
+        "headless": False,    # 必须 False，uc_gui_click_captcha 需要 GUI
+        "locale_code": "en",
+    }
+    if IS_PROXY:
+        sb_kwargs["proxy"] = PROXY_SERVER
+        print(f"⚙️ 已启用代理: {PROXY_SERVER}")
+
+    with SB(**sb_kwargs) as sb:
+        # 1. 登录
+        success = login(sb, EMAIL, PASSWORD)
+        if not success:
+            msg = f"❌ 登录失败\nIP: {current_ip}\n请检查账号密码或 Cloudflare 验证情况"
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="login_failed.png")
+            return
+
+        # 2. 点击 Renew
+        print("\n📄 开始续期流程...")
+        renew_ok = click_renew(sb)
+
+        if renew_ok:
+            sb.save_screenshot("renew_success.png")
+            msg = f"✅ 续期成功！已点击 Renew 按钮\n服务器: TuUzR_dWxO2P\nIP: {current_ip}"
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="renew_success.png")
+            print(msg)
+        else:
+            msg = f"❌ 续期失败，未找到 Renew 按钮\n可能刚续期过或页面结构变化\nIP: {current_ip}"
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="renew_not_found.png")
+            print(msg)
+
+        # 最终状态截图
+        final_img = "final_result.png"
+        sb.save_screenshot(final_img)
+        print(f"📸 最终截图已保存: {final_img}")
+
+    print("🏁 脚本执行完毕")
 
 
 if __name__ == "__main__":
-    if EMAIL == "你的邮箱@example.com" or PASSWORD == "你的密码":
-        print("⚠️  请先设置 SKYMC_EMAIL 和 SKYMC_PASSWORD 环境变量！")
-        sys.exit(1)
-    renew_server()
+    main()
