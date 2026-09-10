@@ -1,80 +1,54 @@
-# SkyMC 免费服务器自动续期工具
+# SkyMC 免费服务器自动续期工具 v3
 
-针对服务器 `TuUzR_dWxO2P`（zdsa.skymc.io）的完整自动续期方案。
+针对服务器 `TuUzR_dWxO2P`（zdsa.skymc.io）
+
+## 本版本更新
+
+- **新增 Cloudflare「Verify you are human」模拟点击**
+  - 自动检测验证框
+  - 模拟鼠标移动 + 点击
+  - 支持 iframe 内点击
+  - 等待验证结果并截图发送到 Telegram
+- 隐藏 webdriver 特征，降低被检测概率
+- 成功 / 失败都会发送带截图的 Telegram 通知
 
 ## 文件说明
 
-| 文件 | 说明 |
-|------|------|
-| `skymc_renew.py` | 核心 Python 脚本（使用 Playwright 自动登录并点击 Renew） |
-| `.github/workflows/skymc-renew.yml` | GitHub Actions 工作流（定时自动运行） |
-| `requirements.txt` | Python 依赖 |
-| `README.md` | 本说明文件 |
+| 文件 | 推荐度 | 说明 |
+|------|--------|------|
+| `skymc_remind.py` | ★★★★★ | 纯提醒 + Telegram（最稳定，推荐） |
+| `skymc_renew.py` | ★★★☆☆ | 自动登录 + 模拟点击 Cloudflare + 点击 Renew |
+| `.github/workflows/skymc-remind.yml` | 推荐 | 定时提醒 |
+| `.github/workflows/skymc-renew.yml` | 实验 | 自动点击（已增强 Cloudflare 处理） |
 
-## 一、本地运行（推荐先测试）
+## 使用方法
 
-1. 安装依赖：
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
+### 1. 获取 Telegram 配置
 
-2. 设置账号密码（二选一）：
+1. 找 `@BotFather` 创建机器人 → 拿到 **Token**
+2. 给你的机器人发任意消息
+3. 打开：`https://api.telegram.org/bot你的Token/getUpdates`
+4. 找到 `"chat":{"id": 数字}` → 这就是 **Chat ID**
 
-**方法 A：环境变量（推荐）**
-```bash
-export SKYMC_EMAIL="你的登录邮箱"
-export SKYMC_PASSWORD="你的登录密码"
-python skymc_renew.py
-```
+### 2. 设置 GitHub Secrets
 
-**方法 B：直接修改脚本**
-打开 `skymc_renew.py`，修改开头的 `EMAIL` 和 `PASSWORD` 两行。
+| Secret 名称 | 是否必须 | 说明 |
+|-------------|---------|------|
+| `TG_BOT_TOKEN` | 是 | Telegram Bot Token |
+| `TG_CHAT_ID` | 是 | 你的 Chat ID |
+| `SKYMC_EMAIL` | 仅自动点击需要 | 登录邮箱 |
+| `SKYMC_PASSWORD` | 仅自动点击需要 | 登录密码 |
 
-3. 运行后会自动登录并点击 Renew 按钮，同时保存截图。
+### 3. 上传并运行
 
-## 二、GitHub Actions 自动运行
+把整个文件夹内容推送到 GitHub 仓库即可。
 
-1. 把整个文件夹内容上传到你的 GitHub 仓库（保持目录结构）。
+- 提醒方案默认每 **6 小时**运行一次
+- 自动点击方案默认每 **8 小时**运行一次
 
-2. 在仓库设置 Secrets：
-   - 进入仓库 → **Settings** → **Secrets and variables** → **Actions**
-   - 点击 **New repository secret**
-   - 添加两个：
-     - 名称：`SKYMC_EMAIL`，值：你的登录邮箱
-     - 名称：`SKYMC_PASSWORD`，值：你的登录密码
+## 注意事项
 
-3. 提交代码后，Actions 会自动按计划运行（默认每 6 小时一次）。
-
-4. 也可在 Actions 页面手动点击 **Run workflow** 立即执行。
-
-5. 运行结束后可在 Artifacts 下载截图查看结果。
-
-## 三、调整运行频率
-
-编辑 `.github/workflows/skymc-renew.yml` 中的 cron 表达式：
-
-```yaml
-- cron: '0 */6 * * *'   # 每 6 小时
-- cron: '0 */4 * * *'   # 每 4 小时
-- cron: '0 8,20 * * *'  # 每天 8 点和 20 点
-```
-
-## 四、注意事项
-
-- 免费计划需要定期点击 **Renew**，否则倒计时结束后服务器会停止。
-- 建议频率：每 4~8 小时运行一次（根据面板显示的剩余时间调整）。
-- 账号密码请务必使用 GitHub Secrets，不要硬编码在代码中。
-- 如果网站前端结构发生变化，脚本可能需要更新选择器。
-- 本工具仅供个人学习使用，请遵守网站服务条款。
-
-## 五、常见问题
-
-**Q：提示找不到 Renew 按钮？**  
-A：可能刚刚已经续期过，或服务器未启动。先手动登录面板确认状态。
-
-**Q：登录失败？**  
-A：检查邮箱密码是否正确，或网站是否开启了额外验证。
-
-**Q：想收到手机通知？**  
-A：可自行在脚本末尾添加 Telegram / 企业微信 / Discord webhook 代码。
+1. Cloudflare 验证越来越严格，即使加了模拟点击，**成功率仍然无法保证 100%**。
+2. 如果自动点击连续失败，请优先使用提醒方案，手动点一次 Renew 即可。
+3. 建议把提醒和自动点击同时启用，互为备份。
+4. 账号密码务必使用 Secrets，不要写在代码里。
