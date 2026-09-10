@@ -2,8 +2,8 @@ name: SkyMC 自动续期
 
 on:
   schedule:
-    # 每 6 小时运行一次（可根据实际倒计时调整，建议 4~8 小时）
-    - cron: '0 */6 * * *'
+    # 每 1 小时运行一次（可根据实际倒计时调整，建议 4~8 小时）
+    - cron: '0 */1 * * *'
   workflow_dispatch:  # 支持在 GitHub 页面手动触发
 
 jobs:
