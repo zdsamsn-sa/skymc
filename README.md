@@ -1,11 +1,10 @@
-# SkyMC 自动续期工具 v7
+# SkyMC 自动续期工具 v8
 
-## 本次重点改进
-- 在**打开页面后、填写完成后、点击登录后**三个时机都检测并处理 Cloudflare
-- `handle_cloudflare` 增加多次重试 + 多种点击方式
-- 登录循环中持续检测验证弹窗
+## 本次修复
+1. 修复 JS `Identifier 'selectors' has already been declared` 语法错误
+2. 点击 Renew 后再次处理可能弹出的 Cloudflare
+3. 点击后会再尝试点一次 Renew，防止被验证打断
+4. 最终截图用于确认倒计时是否重置
 
-## 现实说明
-即使使用 SeleniumBase UC + `uc_gui_click_captcha`，在 GitHub Actions 的 Xvfb 环境下，Cloudflare Turnstile 仍有一定概率无法通过。
-
-**强烈建议同时启用提醒工作流作为保底。**
+## 说明
+从 v7 日志看，登录和点击 Renew 已经成功。v8 主要解决面板页再次弹出验证的问题。
