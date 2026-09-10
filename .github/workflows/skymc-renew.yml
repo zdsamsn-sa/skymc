@@ -1,40 +1,40 @@
-name: SkyMC 自动续期
+name: SkyMC 自动点击续期（含 Cloudflare 模拟）
 
 on:
   schedule:
-    # 每 1 小时运行一次（可根据实际倒计时调整，建议 4~8 小时）
-    - cron: '0 */1 * * *'
-  workflow_dispatch:  # 支持在 GitHub 页面手动触发
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
 
 jobs:
   renew:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 设置 Python 环境
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 安装 Playwright 及浏览器
+      - name: Install Playwright
         run: |
-          pip install playwright
+          pip install playwright requests
           playwright install chromium --with-deps
 
-      - name: 执行自动续期脚本
+      - name: 执行自动续期（含 Cloudflare 模拟点击）
         env:
           SKYMC_EMAIL: ${{ secrets.SKYMC_EMAIL }}
           SKYMC_PASSWORD: ${{ secrets.SKYMC_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           HEADLESS: "true"
         run: python skymc_renew.py
 
-      - name: 上传截图（成功或失败）
+      - name: 上传截图
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: renew-screenshots
-          path: |
-            *.png
+          path: "*.png"
           if-no-files-found: ignore
