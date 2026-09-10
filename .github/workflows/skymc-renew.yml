@@ -2,7 +2,7 @@ name: SkyMC 自动续期 (SeleniumBase UC)
 
 on:
   schedule:
-    - cron: '0 */8 * * *'   # 每 8 小时
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,7 +20,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install seleniumbase requests
-          # 安装浏览器依赖
           seleniumbase install chromedriver
 
       - name: 安装虚拟显示 (Xvfb)
@@ -34,11 +33,7 @@ jobs:
           SKYMC_PASSWORD: ${{ secrets.SKYMC_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          # 如需代理可取消下面注释并配置
-          # IS_PROXY: "true"
-          # PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
         run: |
-          # 使用 xvfb 提供虚拟显示器，让 uc_gui_click_captcha 能工作
           xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" python skymc_renew.py
 
       - name: 上传截图
