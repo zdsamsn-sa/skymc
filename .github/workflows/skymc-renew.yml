@@ -1,0 +1,40 @@
+name: SkyMC 自动续期
+
+on:
+  schedule:
+    # 每 6 小时运行一次（可根据实际倒计时调整，建议 4~8 小时）
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # 支持在 GitHub 页面手动触发
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装 Playwright 及浏览器
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: 执行自动续期脚本
+        env:
+          SKYMC_EMAIL: ${{ secrets.SKYMC_EMAIL }}
+          SKYMC_PASSWORD: ${{ secrets.SKYMC_PASSWORD }}
+          HEADLESS: "true"
+        run: python skymc_renew.py
+
+      - name: 上传截图（成功或失败）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renew-screenshots
+          path: |
+            *.png
+          if-no-files-found: ignore
