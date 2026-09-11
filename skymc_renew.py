@@ -637,23 +637,77 @@ def click_named_button(sb, names):
     return False
 
 
+def wait_until_online(sb, timeout_sec=180, action_label="启动/重启"):
+    """必须等到状态为 Online 才算成功。Starting 期间不继续续期。"""
+    print(f"⏳ 等待服务器进入 Online（最多 {timeout_sec} 秒）...")
+    end = time.time() + timeout_sec
+    last_status = ""
+    while time.time() < end:
+        handle_cloudflare(sb)
+        info = read_panel_info(sb)
+        st = (info.get("status") or "").lower()
+        last_status = st or last_status
+        if st == "online":
+            # 再等一小会让 Renew 按钮渲染出来
+            time.sleep(3)
+            info2 = read_panel_info(sb)
+            if (info2.get("status") or "").lower() == "online":
+                print(f"✅ {action_label}成功，服务器已 Online")
+                if info2.get("hasRenew"):
+                    print("   Renew 按钮已可用")
+                else:
+                    print("   提示：Online 但暂未检测到 Renew，稍后仍会尝试点击")
+                return True, info2
+        if st == "starting":
+            print("   仍在 Starting，继续等待...")
+        elif st in ("offline", "stopped"):
+            print("   当前 Offline/Stopped，继续等待或需再次启动...")
+        else:
+            print(f"   当前状态: {st or 'unknown'}，继续等待...")
+        time.sleep(5)
+        # 每 30 秒左右刷新一次面板，避免状态卡住
+        if int(time.time()) % 30 < 5:
+            try:
+                sb.refresh()
+                sb.wait_for_ready_state_complete()
+                time.sleep(2)
+                handle_cloudflare(sb)
+            except Exception:
+                pass
+    print(f"⚠️ 等待超时，最后状态仍为: {last_status or 'unknown'}")
+    return False, read_panel_info(sb)
+
+
 def ensure_server_running(sb, info):
+    """
+    保证服务器真正 Online 后再返回。
+    - Online：直接通过
+    - Starting：只等待，不抢点 Renew
+    - Offline/Stopped：点 Start，再等到 Online
+    - 若需要重启且存在 Restart：可点 Restart 再等到 Online
+    """
     status = (info.get("status") or "").lower()
     has_start = info.get("hasStart")
     has_stop = info.get("hasStop")
+    has_restart = info.get("hasRestart")
 
-    offline = status in ("offline", "stopped", "unknown") and not has_stop
-    if status == "online" or has_stop:
-        print("   服务器已在运行，无需启动")
+    # 已 Online：直接成功（不要用 hasStop 误判，Starting 时也可能有 Stop）
+    if status == "online":
+        print("   服务器已 Online，无需启动/重启")
         return True, "已在运行"
 
-    if not (offline or has_start or status in ("offline", "stopped", "starting")):
-        print("   状态不明确，尝试检测 Start 按钮")
+    # Starting：只等待到 Online
+    if status == "starting":
+        print("🔌 服务器正在 Starting，等待启动完成后再续期...")
+        ok, _ = wait_until_online(sb, timeout_sec=180, action_label="启动")
+        if ok:
+            return True, "等待 Starting 完成，服务器已 Online"
+        return False, "Starting 超时，未进入 Online"
 
-    print("🔌 检测到服务器未运行，尝试点击 Start ...")
-    clicked = click_named_button(sb, ["Start", "启动", "play"])
+    # Offline / Stopped / unknown：点 Start
+    print(f"🔌 服务器状态为 {status or 'unknown'}，尝试点击 Start ...")
+    clicked = click_named_button(sb, ["Start", "启动"])
     if not clicked:
-        # 左侧绿色播放按钮兜底
         try:
             sb.execute_script(
                 """
@@ -671,22 +725,33 @@ def ensure_server_running(sb, info):
                 return false;
                 """
             )
+            clicked = True
+            print("   已通过播放图标尝试启动")
         except Exception:
             pass
 
+    if not clicked and has_restart:
+        print("   未找到 Start，尝试 Restart ...")
+        clicked = click_named_button(sb, ["Restart", "重启"])
+        action = "重启"
+    else:
+        action = "启动"
+
+    if not clicked and not has_start and status not in ("starting",):
+        # 再读一次，可能已经在 Starting
+        info2 = read_panel_info(sb)
+        if (info2.get("status") or "").lower() == "starting":
+            ok, _ = wait_until_online(sb, timeout_sec=180, action_label="启动")
+            return (True, "等待 Starting 完成，服务器已 Online") if ok else (False, "Starting 超时，未进入 Online")
+        print("⚠️ 未找到 Start/Restart 按钮")
+        return False, "未找到 Start/Restart 按钮"
+
     time.sleep(5)
     handle_cloudflare(sb)
-    for i in range(12):
-        info2 = read_panel_info(sb)
-        st = (info2.get("status") or "").lower()
-        if st == "online" or info2.get("hasStop"):
-            print("✅ 服务器已启动")
-            return True, "已点击 Start，服务器已在线"
-        if st == "starting":
-            print("   正在启动中...")
-        time.sleep(3)
-    print("⚠️ 已尝试启动，但未确认进入 Online")
-    return False, "已尝试点击 Start，未确认在线"
+    ok, _ = wait_until_online(sb, timeout_sec=180, action_label=action)
+    if ok:
+        return True, f"已点击 {action}，服务器已 Online"
+    return False, f"已点击 {action}，但等待 Online 超时"
 
 
 def click_renew(sb):
@@ -726,7 +791,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v12")
+    print("🚀 启动 SkyMC 自动续期脚本 v12.1")
     print(f"目标服务器: {SERVER_URL}")
 
     start_singbox_from_node_link()
@@ -754,7 +819,35 @@ def main():
         started_ok, start_msg = ensure_server_running(sb, before)
         after_start = read_panel_info(sb)
 
-        print("\n📄 开始续期流程...")
+        if not started_ok:
+            print("⚠️ 服务器未进入 Online，跳过续期，避免找不到 Renew")
+            safe_screenshot(sb, "final_result.png")
+            msg = (
+                f"❌ 续期跳过：服务器未 Online\n"
+                f"服务器: {SERVER_ID}\n"
+                f"当前状态: {(after_start.get('status') or 'unknown')}\n"
+                f"启动操作: {start_msg}\n"
+                f"续期前时间: {format_remaining(before_time)}\n"
+                f"IP: {current_ip}"
+            )
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path="final_result.png")
+            print("🏁 脚本执行完毕")
+            return
+
+        # Online 后再确认一次 Renew 是否出现；没有则多等一会儿
+        if not after_start.get("hasRenew"):
+            print("⏳ Online 但尚未看到 Renew，再等待最多 60 秒...")
+            end_wait = time.time() + 60
+            while time.time() < end_wait:
+                time.sleep(5)
+                after_start = read_panel_info(sb)
+                if after_start.get("hasRenew") or (after_start.get("status") or "").lower() != "online":
+                    break
+            if not after_start.get("hasRenew"):
+                print("   仍未检测到 Renew 标记，仍将尝试点击")
+
+        print("\n📄 开始续期流程（服务器已 Online）...")
         renew_ok = click_renew(sb)
 
         print("⏳ 等待续期结果刷新...")
