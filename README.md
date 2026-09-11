@@ -22,7 +22,6 @@
 | 干净截图 | 等验证弹窗消失后再截图，上传 Actions Artifact |
 | Telegram 通知 | 文字 + 截图 |
 | 节点代理 | `NODE_LINK`（`vless://` / `vmess://`）启动 sing-box 突破区域限制 |
-| 备用提醒 | 不登录，只定时发 Telegram 提醒手动点 Renew |
 
 ---
 
