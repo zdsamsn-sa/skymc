@@ -372,31 +372,32 @@ def read_panel_info(sb):
     return info
 
 
-def format_remaining(hhmm):
-    if not hhmm:
+def format_remaining(mmss):
+    if not mmss:
         return "未读到"
-    parts = str(hhmm).split(":")
+    parts = str(mmss).split(":")
     try:
         if len(parts) == 2:
-            h, m = int(parts[0]), int(parts[1])
-            return f"{hhmm}（{h}小时{m}分钟）"
+            m, s = int(parts[0]), int(parts[1])
+            return f"{mmss}（{m}分钟{s}秒）"
         if len(parts) == 3:
             h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
-            return f"{hhmm}（{h}小时{m}分{s}秒）"
+            return f"{mmss}（{h}小时{m}分{s}秒）"
     except Exception:
         pass
-    return str(hhmm)
+    return str(mmss)
 
 
-def remaining_to_minutes(hhmm):
-    if not hhmm:
+def remaining_to_seconds(mmss):
+    """面板倒计时为 MM:SS（如 102:18 = 102分钟18秒）"""
+    if not mmss:
         return None
-    parts = str(hhmm).split(":")
+    parts = str(mmss).split(":")
     try:
         if len(parts) == 2:
             return int(parts[0]) * 60 + int(parts[1])
         if len(parts) == 3:
-            return int(parts[0]) * 60 + int(parts[1])
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
     except Exception:
         return None
     return None
@@ -530,7 +531,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v11")
+    print("🚀 启动 SkyMC 自动续期脚本 v11.1")
     print(f"目标服务器: {SERVER_URL}")
     current_ip = get_current_ip()
     print(f"🎯 当前出口 IP: {current_ip}")
@@ -568,14 +569,14 @@ def main():
 
         safe_screenshot(sb, "final_result.png")
 
-        before_min = remaining_to_minutes(before_time)
-        after_min = remaining_to_minutes(after_time)
+        before_sec = remaining_to_seconds(before_time)
+        after_sec = remaining_to_seconds(after_time)
         time_note = "无法对比（有一侧未读到时间）"
-        if before_min is not None and after_min is not None:
-            delta = after_min - before_min
-            if delta > 5:
-                time_note = f"倒计时已增加约 {delta} 分钟，续期生效"
-            elif delta >= -2:
+        if before_sec is not None and after_sec is not None:
+            delta = after_sec - before_sec
+            if delta > 30:
+                time_note = f"倒计时已增加约 {delta} 秒，续期生效"
+            elif delta >= -5:
                 time_note = "倒计时变化很小，可能刚续过或尚未刷新"
             else:
                 time_note = "倒计时未增加，请人工核对截图"
