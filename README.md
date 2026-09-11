@@ -1,10 +1,10 @@
-# SkyMC 免费服务器自动续期工具 v12
+# SkyMC 免费服务器自动续期工具
 
-针对 SkyMC 免费计划服务器 **zdsa**（ID：`TuUzR_dWxO2P`）的 GitHub Actions 自动续期方案。
+针对 SkyMC 免费计划服务器的 GitHub Actions 自动续期方案。
 
-- 面板：https://skymc.org/en/server/TuUzR_dWxO2P
+- 面板：https://skymc.org/en/server/***
 - 登录：https://skymc.org/en/login
-- 游戏地址：`zdsa.skymc.io`
+- 游戏地址：`***.skymc.io`
 
 免费计划需要定期点面板上的蓝色 **Renew** 按钮，倒计时归零后服务器会停止。本工具用 GitHub Actions 定时登录、过 Cloudflare、点 Renew；关机则点 Start；并把结果（含倒计时和截图）发到 Telegram。
 
@@ -29,7 +29,7 @@
 ## 目录结构
 
 ```
-skymc-renew-v12/
+skymc-renew/
 ├── README.md
 ├── requirements.txt
 ├── skymc_renew.py                 # 主脚本（登录 / 验证 / 续期 / 启动 / 代理）
@@ -76,7 +76,7 @@ Telegram 示例：
 ```
 【SkyMC 续期】
 ✅ 续期已执行
-服务器: TuUzR_dWxO2P
+服务器: ****
 当前状态: Online
 启动操作: 已在运行
 续期前时间: 102:18（102分钟18秒）
