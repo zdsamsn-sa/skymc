@@ -1,10 +1,10 @@
-# SkyMC 免费服务器自动续期工具 v12
+# SkyMC 免费服务器自动续期工具
 
-针对 SkyMC 免费计划服务器 **zdsa**（ID：`TuUzR_dWxO2P`）的 GitHub Actions 自动续期方案。
+针对 SkyMC 免费计划服务器的 GitHub Actions 自动续期方案。
 
-- 面板：https://skymc.org/en/server/TuUzR_dWxO2P
+- 面板：https://skymc.org/en/server/*****
 - 登录：https://skymc.org/en/login
-- 游戏地址：`zdsa.skymc.io`
+- 游戏地址：`***.skymc.io`
 
 免费计划需要定期点面板上的蓝色 **Renew** 按钮，倒计时归零后服务器会停止。本工具用 GitHub Actions 定时登录、过 Cloudflare、点 Renew；关机则点 Start；并把结果（含倒计时和截图）发到 Telegram。
 
@@ -29,7 +29,7 @@
 ## 目录结构
 
 ```
-skymc-renew-v12/
+skymc-renew/
 ├── README.md
 ├── requirements.txt
 ├── skymc_renew.py                 # 主脚本（登录 / 验证 / 续期 / 启动 / 代理）
@@ -181,9 +181,7 @@ IP: x.x.x.x
 修改频率示例：
 
 ```yaml
-- cron: '0 */8 * * *'      # 每 8 小时
-- cron: '0 */4 * * *'      # 每 4 小时
-- cron: '0 0,8,16 * * *'   # 每天 0/8/16 UTC
+- cron: '0 */1 * * *'      # 每 1 小时
 ```
 
 ---
@@ -260,28 +258,16 @@ GitHub 出口 IP 容易被 Cloudflare 拦。配置 `NODE_LINK` 换出口。UC �
 
 ---
 
-## 版本记录
-
-| 版本 | 内容 |
-|------|------|
-| v7–v9 | 登录选择器、Cloudflare 重试 |
-| v10 | 使用真实选择器 `#usernameOrEmail-s1` / `#password-s1`，登录 + Renew 跑通 |
-| v11 | 关机点 Start；读取倒计时；验证消失后再截图 |
-| v11.1 | 倒计时按 **分钟:秒** 显示和计算 |
-| v12 | 新增 `NODE_LINK` + sing-box 代理 |
-
----
-
 ## 提醒脚本文案（skymc_remind.py）
 
 ```
 SkyMC 免费服务器续期提醒
 
-服务器：zdsa
-ID：TuUzR_dWxO2P
-地址：zdsa.skymc.io
+服务器：***
+ID：*****
+地址：***.skymc.io
 
-面板：https://skymc.org/en/server/TuUzR_dWxO2P
+面板：https://skymc.org/en/server/****
 
 请尽快登录并点击蓝色 Renew 按钮！
 ```
