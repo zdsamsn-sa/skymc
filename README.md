@@ -22,7 +22,6 @@
 | 干净截图 | 等验证弹窗消失后再截图，上传 Actions Artifact |
 | Telegram 通知 | 文字 + 截图 |
 | 节点代理 | `NODE_LINK`（`vless://` / `vmess://`）启动 sing-box 突破区域限制 |
-| 备用提醒 | 不登录，只定时发 Telegram 提醒手动点 Renew |
 
 ---
 
@@ -33,10 +32,8 @@ skymc-renew/
 ├── README.md
 ├── requirements.txt
 ├── skymc_renew.py                 # 主脚本（登录 / 验证 / 续期 / 启动 / 代理）
-├── skymc_remind.py                # 纯提醒脚本（不登录）
 └── .github/workflows/
-    ├── skymc-renew.yml            # 每 8 小时自动续期
-    └── skymc-remind.yml           # 每 6 小时提醒
+    └── skymc-renew.yml            # 每 1 小时自动续期
 ```
 
 依赖：
