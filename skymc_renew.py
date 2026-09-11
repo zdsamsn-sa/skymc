@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SkyMC 自动续期脚本 v12
+SkyMC 自动续期脚本
 
 v11 已能登录、续期、关机启动、读取 MM:SS 倒计时。
 v12 新增 NODE_LINK（vless:// 或 vmess://）启动 sing-box 本地代理。
