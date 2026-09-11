@@ -257,16 +257,4 @@ GitHub 出口 IP 容易被 Cloudflare 拦。配置 `NODE_LINK` 换出口。UC �
 
 ---
 
-## 提醒脚本文案（skymc_remind.py）
-
-```
-SkyMC 免费服务器续期提醒
-
-服务器：***
-ID：*****
-地址：***.skymc.io
-
-面板：https://skymc.org/en/server/****
-
-请尽快登录并点击蓝色 Renew 按钮！
-```
+## 免责声明: 本脚本仅供学习交流与自动化技术研究使用，请合理设置请求频率，遵守服务商的 TOS（服务条款）。
