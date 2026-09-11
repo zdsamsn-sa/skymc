@@ -272,16 +272,6 @@ GitHub 出口 IP 容易被 Cloudflare 拦。配置 `NODE_LINK` 换出口。UC �
 
 ---
 
-## 提醒脚本文案（skymc_remind.py）
-
-```
-SkyMC 免费服务器续期提醒
-
-服务器：zdsa
-ID：TuUzR_dWxO2P
-地址：zdsa.skymc.io
-
-面板：https://skymc.org/en/server/TuUzR_dWxO2P
-
-请尽快登录并点击蓝色 Renew 按钮！
+## 免责声明
+本项目仅供个人使用，用于续期你自己的账号资源。请遵守 MWS 平台的服务条款，不要用于批量注册或薅羊毛。
 ```
