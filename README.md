@@ -1,29 +1,21 @@
-# SkyMC 自动续期工具 
+# SkyMC 自动续期工具 v12
 
-登录并点击 Renew 增加状态检测、关机启动、续期后时间对比、干净截图。
+## 新增 NODE_LINK
 
-## 新增
+GitHub Secrets 增加：
 
-1. **关机则启动**：面板状态不是 Online 时，点击 `Start` / `启动`
-2. **读取剩余时间**：续期前 / 续期后各读一次，例如 `81:38（81小时38分钟）`
-3. **对比是否生效**：后续时间明显增加则判定续期成功
-4. **截图前先关掉 Cloudflare 弹窗**，避免截图被验证框挡住
+| Secret | 必须 | 说明 |
+|--------|------|------|
+| `SKYMC_EMAIL` | 是 | 登录邮箱 |
+| `SKYMC_PASSWORD` | 是 | 登录密码 |
+| `TG_BOT_TOKEN` | 推荐 | Telegram Bot Token |
+| `TG_CHAT_ID` | 推荐 | Telegram Chat ID |
+| `NODE_LINK` | 推荐 | `vless://...` 或 `vmess://...` 节点链接，用于 sing-box 代理突破区域限制 |
 
-## Telegram 通知示例
+设置 `NODE_LINK` 后，脚本会：
+1. 解析节点链接
+2. 启动本地 sing-box（`127.0.0.1:7890` mixed）
+3. 浏览器和 Telegram 请求都走该代理
+4. 日志里打印代理后的出口 IP（不会打印节点明文）
 
-```
-✅ 续期已执行
-服务器: TuUzR_dWxO2P
-当前状态: Online
-启动操作: 已在运行
-续期前时间: 81:38（81小时38分钟）
-续期后时间: 119:59（119小时59分钟）
-结论: 倒计时已增加约 2301 分钟，续期生效
-```
-
-## Secrets
-
-- `SKYMC_EMAIL`
-- `SKYMC_PASSWORD`
-- `TG_BOT_TOKEN`（推荐）
-- `TG_CHAT_ID`（推荐）
+未设置 `NODE_LINK` 时行为与 v11.1 相同（直连）。

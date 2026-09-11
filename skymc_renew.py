@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SkyMC 自动续期脚本 v11
+SkyMC 自动续期脚本 v12
 
-v10 已能登录 + 点击 Renew。
-v11 新增：
-  1. 读取面板状态 / 剩余时间
-  2. 关机则点击 Start
-  3. 续期后再次读取剩余时间并对比
-  4. 等 Cloudflare 弹窗消失后再截图，保证截图内容正确
+v11 已能登录、续期、关机启动、读取 MM:SS 倒计时。
+v12 新增 NODE_LINK（vless:// 或 vmess://）启动 sing-box 本地代理。
 """
 
 import os
 import sys
 import time
 import json
+import atexit
+import base64
+import shutil
+import socket
+import subprocess
+from urllib.parse import urlparse, parse_qs, unquote
 import requests
 from seleniumbase import SB
 
@@ -27,9 +29,12 @@ SERVER_URL = os.environ.get("SERVER_URL") or "https://skymc.org/en/server/TuUzR_
 LOGIN_URL = "https://skymc.org/en/login"
 SERVER_ID = "TuUzR_dWxO2P"
 
+NODE_LINK = (os.environ.get("NODE_LINK") or "").strip()
 IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
-PROXY_SERVER = os.environ.get("PROXY_SERVER") or "socks5://127.0.0.1:1080"
+PROXY_SERVER = os.environ.get("PROXY_SERVER") or "socks5://127.0.0.1:7890"
+SINGBOX_PORT = int(os.environ.get("SINGBOX_PORT") or "7890")
 REQUESTS_PROXIES = {"http": PROXY_SERVER, "https": PROXY_SERVER} if IS_PROXY else None
+_SINGBOX_PROC = None
 
 EMAIL_SELECTORS = [
     "#usernameOrEmail-s1",
@@ -43,6 +48,196 @@ PASSWORD_SELECTORS = [
     'input[type="password"]',
     'input[id*="password"]',
 ]
+
+
+def _b64decode(data: str) -> bytes:
+    data = data.strip().replace("-", "+").replace("_", "/")
+    pad = (-len(data)) % 4
+    return base64.b64decode(data + ("=" * pad))
+
+
+def _parse_vmess(link: str) -> dict:
+    raw = link[len("vmess://"):]
+    obj = json.loads(_b64decode(raw).decode("utf-8"))
+    host = obj.get("add") or obj.get("host") or ""
+    port = int(obj.get("port") or 443)
+    uuid = obj.get("id") or ""
+    net = (obj.get("net") or "tcp").lower()
+    tls_on = str(obj.get("tls") or "").lower() in ("tls", "reality", "1", "true")
+    sni = obj.get("sni") or obj.get("host") or host
+    outbound = {
+        "type": "vmess",
+        "tag": "proxy",
+        "server": host,
+        "server_port": port,
+        "uuid": uuid,
+        "security": obj.get("scy") or "auto",
+        "alter_id": int(obj.get("aid") or 0),
+    }
+    if tls_on:
+        outbound["tls"] = {
+            "enabled": True,
+            "server_name": sni,
+            "insecure": False,
+            "utls": {"enabled": True, "fingerprint": obj.get("fp") or "chrome"},
+        }
+    if net == "ws":
+        outbound["transport"] = {
+            "type": "ws",
+            "path": obj.get("path") or "/",
+            "headers": {"Host": obj.get("host") or sni or host},
+        }
+    elif net == "grpc":
+        outbound["transport"] = {
+            "type": "grpc",
+            "service_name": obj.get("path") or obj.get("serviceName") or "",
+        }
+    return outbound
+
+
+def _parse_vless(link: str) -> dict:
+    parsed = urlparse(link)
+    uuid = unquote(parsed.username or "")
+    host = parsed.hostname or ""
+    port = parsed.port or 443
+    q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+    security = (q.get("security") or "none").lower()
+    net = (q.get("type") or "tcp").lower()
+    outbound = {
+        "type": "vless",
+        "tag": "proxy",
+        "server": host,
+        "server_port": int(port),
+        "uuid": uuid,
+        "flow": q.get("flow") or "",
+        "packet_encoding": "xudp",
+    }
+    if security in ("tls", "reality"):
+        tls = {
+            "enabled": True,
+            "server_name": q.get("sni") or host,
+            "utls": {"enabled": True, "fingerprint": q.get("fp") or "chrome"},
+        }
+        alpn = q.get("alpn")
+        if alpn:
+            tls["alpn"] = [x.strip() for x in alpn.split(",") if x.strip()]
+        if security == "reality":
+            tls["reality"] = {
+                "enabled": True,
+                "public_key": q.get("pbk") or "",
+                "short_id": q.get("sid") or "",
+            }
+        outbound["tls"] = tls
+    if net == "ws":
+        outbound["transport"] = {
+            "type": "ws",
+            "path": q.get("path") or "/",
+            "headers": {"Host": q.get("host") or q.get("sni") or host},
+        }
+    elif net == "grpc":
+        outbound["transport"] = {
+            "type": "grpc",
+            "service_name": q.get("serviceName") or q.get("path") or "",
+        }
+    elif net == "httpupgrade":
+        outbound["transport"] = {
+            "type": "httpupgrade",
+            "path": q.get("path") or "/",
+            "headers": {"Host": q.get("host") or q.get("sni") or host},
+        }
+    return outbound
+
+
+def build_singbox_config(node_link: str, listen_port: int) -> dict:
+    link = node_link.strip()
+    if link.startswith("vmess://"):
+        outbound = _parse_vmess(link)
+    elif link.startswith("vless://"):
+        outbound = _parse_vless(link)
+    else:
+        raise ValueError("NODE_LINK 仅支持 vless:// 或 vmess://")
+    if not outbound.get("server") or not outbound.get("uuid"):
+        raise ValueError("NODE_LINK 解析失败：缺少 server 或 uuid")
+    return {
+        "log": {"level": "info", "timestamp": True},
+        "inbounds": [
+            {
+                "type": "mixed",
+                "tag": "mixed-in",
+                "listen": "127.0.0.1",
+                "listen_port": listen_port,
+            }
+        ],
+        "outbounds": [
+            outbound,
+            {"type": "direct", "tag": "direct"},
+        ],
+    }
+
+
+def _port_open(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def start_singbox_from_node_link():
+    """根据 NODE_LINK 启动本地 sing-box，并打开 IS_PROXY。"""
+    global IS_PROXY, PROXY_SERVER, REQUESTS_PROXIES, _SINGBOX_PROC
+    if not NODE_LINK:
+        return
+    print("⚙️ 检测到 NODE_LINK，准备启动 sing-box 代理...")
+    scheme = NODE_LINK.split("://", 1)[0].lower() if "://" in NODE_LINK else "?"
+    print(f"   协议: {scheme}://  本地端口: {SINGBOX_PORT}")
+
+    bin_path = shutil.which("sing-box")
+    if not bin_path:
+        print("❌ 已设置 NODE_LINK，但系统中找不到 sing-box")
+        print("   请确认 GitHub Actions 已安装 sing-box")
+        sys.exit(1)
+
+    try:
+        cfg = build_singbox_config(NODE_LINK, SINGBOX_PORT)
+    except Exception as e:
+        print(f"❌ NODE_LINK 解析失败: {e}")
+        sys.exit(1)
+
+    cfg_path = "/tmp/sing-box-skymc.json"
+    log_path = "/tmp/sing-box-skymc.log"
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    logf = open(log_path, "ab")
+    _SINGBOX_PROC = subprocess.Popen(
+        [bin_path, "run", "-c", cfg_path],
+        stdout=logf,
+        stderr=logf,
+    )
+
+    def _stop():
+        if _SINGBOX_PROC and _SINGBOX_PROC.poll() is None:
+            _SINGBOX_PROC.terminate()
+    atexit.register(_stop)
+
+    for _ in range(30):
+        if _SINGBOX_PROC.poll() is not None:
+            break
+        if _port_open("127.0.0.1", SINGBOX_PORT):
+            IS_PROXY = True
+            PROXY_SERVER = f"socks5://127.0.0.1:{SINGBOX_PORT}"
+            REQUESTS_PROXIES = {"http": PROXY_SERVER, "https": PROXY_SERVER}
+            print(f"✅ sing-box 已启动，本地代理 {PROXY_SERVER}")
+            return
+        time.sleep(0.4)
+
+    print("❌ sing-box 启动失败")
+    try:
+        print(open(log_path, "r", errors="ignore").read()[-3000:])
+    except Exception:
+        pass
+    sys.exit(1)
 
 
 def send_tg(token, chat_id, message, image_path=None):
@@ -531,8 +726,11 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v11.1")
+    print("🚀 启动 SkyMC 自动续期脚本 v12")
     print(f"目标服务器: {SERVER_URL}")
+
+    start_singbox_from_node_link()
+
     current_ip = get_current_ip()
     print(f"🎯 当前出口 IP: {current_ip}")
 
