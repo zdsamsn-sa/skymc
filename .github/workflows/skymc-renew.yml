@@ -1,4 +1,4 @@
-name: SkyMC 自动续期 (SeleniumBase UC)
+name: SkyMC 自动续期
 
 on:
   schedule:
