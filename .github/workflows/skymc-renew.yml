@@ -2,7 +2,7 @@ name: SkyMC 自动续期 (SeleniumBase UC)
 
 on:
   schedule:
-    - cron: '0 */1 * * *'
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -27,12 +27,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
 
+      - name: 安装 sing-box（NODE_LINK 代理用）
+        run: |
+          set -e
+          VER=1.11.15
+          curl -fsSL -o /tmp/sing-box.tgz \
+            "https://github.com/SagerNet/sing-box/releases/download/v${VER}/sing-box-${VER}-linux-amd64.tar.gz"
+          tar -xzf /tmp/sing-box.tgz -C /tmp
+          sudo install -m 0755 /tmp/sing-box-${VER}-linux-amd64/sing-box /usr/local/bin/sing-box
+          sing-box version
+
       - name: 执行自动续期
         env:
           SKYMC_EMAIL: ${{ secrets.SKYMC_EMAIL }}
           SKYMC_PASSWORD: ${{ secrets.SKYMC_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" python skymc_renew.py
 
