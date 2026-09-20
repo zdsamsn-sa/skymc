@@ -2,8 +2,8 @@ name: SkyMC 自动续期 (SeleniumBase UC)
 
 on:
   schedule:
-    # 每小时的 0 分和 45 分各跑一次（约每 45 分钟）
-    - cron: '0,45 * * * *'
+    # 每15分跑一次
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
