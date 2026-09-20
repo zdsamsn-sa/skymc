@@ -496,6 +496,179 @@ def login(sb, email, password):
     return False
 
 
+def is_activate_server_page(sb):
+    """是否处于「Activate Your Server」选套餐页"""
+    try:
+        text = ""
+        try:
+            text = sb.execute_script(
+                "return (document.body && document.body.innerText) ? document.body.innerText : '';"
+            ) or ""
+        except Exception:
+            text = sb.get_page_source() or ""
+        blob = text.lower()
+        if "activate your server" in blob:
+            return True
+        # 备选：有 Plan + COAL Free，且没有面板特征
+        if "coal" in blob and "free" in blob and "plan" in blob:
+            if "expires in" not in blob and "console" not in blob:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def click_coal_free(sb):
+    """在 Activate 页点击 COAL Free 套餐并进入面板"""
+    print("🆓 检测到 Activate Your Server 页面，查找 COAL Free ...")
+
+    # 选择器：卡片/按钮上的 COAL + Free
+    selectors = [
+        'button:contains("COAL")',
+        'div:contains("COAL")',
+        '//*[contains(., "COAL") and contains(., "Free")]',
+        '//*[contains(translate(., "coal", "COAL"), "COAL")]',
+        '//button[contains(., "COAL")]',
+        '//div[contains(@class,"card") and contains(., "COAL")]',
+    ]
+    clicked = False
+    for sel in selectors:
+        try:
+            if sb.is_element_visible(sel):
+                try:
+                    sb.uc_click(sel)
+                except Exception:
+                    sb.click(sel)
+                print(f"✅ 已点击 COAL 套餐（{sel}）")
+                clicked = True
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        try:
+            result = sb.execute_script(
+                r"""
+                var nodes = document.querySelectorAll('button, a, div, section, article, label, span');
+                var best = null;
+                for (var i = 0; i < nodes.length; i++) {
+                    var n = nodes[i];
+                    var t = (n.innerText || n.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!t || t.length > 120) continue;
+                    // 套餐卡片通常同时含 COAL 与 Free / 3 GB
+                    if (!/coal/i.test(t)) continue;
+                    if (!(/free/i.test(t) || /3\s*gb/i.test(t))) continue;
+                    var r = n.getBoundingClientRect();
+                    if (r.width < 40 || r.height < 20) continue;
+                    // 优先更小、更像卡片的节点
+                    var score = 10000 - (r.width * r.height) / 100;
+                    if (/^coal/i.test(t)) score += 500;
+                    if (!best || score > best.score) {
+                        best = {el: n, text: t.slice(0, 80), score: score, x: r.left+r.width/2, y: r.top+r.height/2};
+                    }
+                }
+                if (!best) return null;
+                var target = best.el.closest('button') || best.el.closest('a') || best.el.closest('[role="button"]') || best.el;
+                try { target.scrollIntoView({block:'center'}); } catch (e) {}
+                try { target.click(); } catch (e) {}
+                var opts = {bubbles:true, cancelable:true, view:window, clientX:best.x, clientY:best.y, button:0};
+                ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(type) {
+                    try {
+                        var Ev = type.indexOf('pointer')===0 ? PointerEvent : MouseEvent;
+                        target.dispatchEvent(new Ev(type, opts));
+                    } catch (e) {}
+                });
+                return best.text;
+                """
+            )
+            if result:
+                print(f"✅ 已通过 JS 点击 COAL Free: {result}")
+                clicked = True
+        except Exception as e:
+            print(f"   JS 点击 COAL 失败: {e}")
+
+    if not clicked:
+        # CDP 坐标兜底
+        try:
+            box = sb.execute_script(
+                r"""
+                var nodes = document.querySelectorAll('button, a, div, section, article');
+                for (var i = 0; i < nodes.length; i++) {
+                    var n = nodes[i];
+                    var t = (n.innerText || '').replace(/\s+/g, ' ').trim();
+                    if (!/coal/i.test(t)) continue;
+                    if (!(/free/i.test(t) || /3\s*gb/i.test(t))) continue;
+                    var r = n.getBoundingClientRect();
+                    if (r.width < 40 || r.height < 20) continue;
+                    return JSON.stringify({x: r.left+r.width/2, y: r.top+r.height/2, text: t.slice(0,60)});
+                }
+                return null;
+                """
+            )
+            if box:
+                info = json.loads(box)
+                print(f"   尝试 CDP 点击 COAL @ ({info['x']:.0f},{info['y']:.0f})")
+                if _cdp_click_xy(sb, float(info["x"]), float(info["y"])):
+                    clicked = True
+                    print("✅ 已 CDP 点击 COAL Free")
+        except Exception as e:
+            print(f"   CDP 点击 COAL 失败: {e}")
+
+    if not clicked:
+        print("❌ 未找到 COAL Free 套餐卡片")
+        safe_screenshot(sb, "coal_not_found.png")
+        return False
+
+    # 等待进入面板：不再是 Activate 页
+    print("⏳ 等待进入服务器面板...")
+    time.sleep(3)
+    handle_cloudflare(sb)
+    for i in range(24):
+        if challenge_visible(sb):
+            handle_cloudflare(sb, max_retry=2)
+        try:
+            text = sb.execute_script(
+                "return (document.body && document.body.innerText) ? document.body.innerText : '';"
+            ) or ""
+        except Exception:
+            text = ""
+        lower = text.lower()
+        if "activate your server" not in lower and (
+            "expires in" in lower
+            or "online" in lower
+            or "offline" in lower
+            or "stop" in lower
+            or "start" in lower
+            or "console" in lower
+        ):
+            print("✅ 已进入服务器面板")
+            wait_challenge_gone(sb, timeout=10)
+            return True
+        # 若仍有 Continue / Confirm / Activate 确认按钮则点一下
+        try:
+            for label in ("Continue", "Confirm", "Activate", "Create", "Next", "继续", "确认", "激活"):
+                sel = f'button:contains("{label}")'
+                if sb.is_element_visible(sel):
+                    sb.click(sel)
+                    print(f"   已点击确认按钮: {label}")
+                    time.sleep(2)
+                    break
+        except Exception:
+            pass
+        time.sleep(2)
+
+    print("⚠️ 已点击 COAL，但未确认进入面板，继续后续流程")
+    safe_screenshot(sb, "after_coal_click.png")
+    return True
+
+
+def ensure_not_on_activate_page(sb):
+    """若当前是选套餐页，先选 COAL Free 进入面板"""
+    if not is_activate_server_page(sb):
+        return True
+    return click_coal_free(sb)
+
+
 def open_server_panel(sb):
     print("📄 进入服务器面板...")
     try:
@@ -507,6 +680,10 @@ def open_server_panel(sb):
     handle_cloudflare(sb)
     wait_challenge_gone(sb, timeout=15)
     time.sleep(2)
+
+    # 免费服过期后可能进入 Activate Your Server，需先选 COAL Free
+    ensure_not_on_activate_page(sb)
+    time.sleep(1)
 
 
 def read_panel_info(sb):
@@ -1235,7 +1412,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v12.4")
+    print("🚀 启动 SkyMC 自动续期脚本 v12.5")
     print(f"目标服务器: {SERVER_URL}")
 
     start_singbox_from_node_link()
