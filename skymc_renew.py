@@ -668,9 +668,11 @@ def click_coal_free(sb):
         safe_screenshot(sb, "coal_not_found.png")
         return False
 
-    # 选中后可能还有确认 / 创建步骤
-    print("⏳ 等待激活完成并进入面板...")
+    # 选中 COAL 后：若出现 Location + Start Server，则点 Start Server；没有则跳过
+    print("⏳ 等待 Start Server 页或直接进入面板...")
     time.sleep(2)
+    start_server_clicked = False
+
     for step in range(30):
         if challenge_visible(sb):
             print("   激活过程中出现验证...")
@@ -685,20 +687,38 @@ def click_coal_free(sb):
             text = ""
         lower = text.lower()
 
-        # 已在面板
-        if "activate your server" not in lower and (
+        # 已在真正的服务器控制面板（不是激活页上的 Start Server）
+        if (
             "expires in" in lower
-            or re.search(r"\bonline\b", lower)
-            or re.search(r"\boffline\b", lower)
-            or "console" in lower
-            and ("stop" in lower or "start" in lower or "restart" in lower)
-        ):
+            or (
+                re.search(r"\bonline\b", lower)
+                and ("stop" in lower or "restart" in lower or "console" in lower)
+            )
+            or (
+                re.search(r"\boffline\b", lower)
+                and ("console" in lower or "start" in lower)
+            )
+        ) and "start server" not in lower:
             print("✅ 已进入服务器面板")
             wait_challenge_gone(sb, timeout=12)
             return True
 
-        # 点可能的确认按钮
+        # 出现 Start Server 大按钮（COAL 已选 + Location + Summary）
+        if start_server_visible(sb) or "start server" in lower:
+            if not start_server_clicked:
+                print("🚀 检测到 Start Server 页面，准备点击...")
+                ensure_location_selected(sb)
+                if click_start_server_button(sb):
+                    start_server_clicked = True
+                    print("✅ 已点击 Start Server")
+                    time.sleep(4)
+                    handle_cloudflare(sb)
+                    continue
+                print("   ⚠️ Start Server 点击失败，将重试...")
+
+        # 其它确认按钮
         for label in (
+            "Start Server",
             "Continue",
             "Confirm",
             "Activate",
@@ -716,33 +736,36 @@ def click_coal_free(sb):
             try:
                 sel = f'button:contains("{label}")'
                 if sb.is_element_visible(sel):
-                    sb.click(sel)
-                    print(f"   已点击确认: {label}")
+                    try:
+                        sb.uc_click(sel)
+                    except Exception:
+                        sb.click(sel)
+                    print(f"   已点击按钮: {label}")
+                    if "start server" in label.lower():
+                        start_server_clicked = True
                     time.sleep(2)
                     break
             except Exception:
                 continue
 
-        # 每几步重新打开服务器 URL，避免卡在中间页
-        if step in (8, 16, 24):
-            print(f"   第 {step} 步仍未进面板，重新打开服务器 URL...")
+        if step in (6, 14) and is_activate_server_page(sb) and "start server" not in lower:
+            card2 = locate_coal_card(sb)
+            if card2:
+                _cdp_click_xy(sb, float(card2["x"]), float(card2["y"]))
+                print("   再次点击 COAL 卡片")
+                time.sleep(2)
+
+        if start_server_clicked and step in (10, 18, 24):
+            print(f"   已点 Start Server，第 {step} 步打开面板 URL...")
             try:
                 sb.uc_open_with_reconnect(SERVER_URL, reconnect_time=4)
             except Exception:
                 sb.open(SERVER_URL)
             time.sleep(3)
             handle_cloudflare(sb)
-            if is_activate_server_page(sb):
-                # 再次尝试点 COAL
-                card2 = locate_coal_card(sb)
-                if card2:
-                    _cdp_click_xy(sb, float(card2["x"]), float(card2["y"]))
-                    print("   再次 CDP 点击 COAL")
-                    time.sleep(2)
 
         time.sleep(2)
 
-    # 最后强制进一次面板 URL
     print("   最后一次打开服务器面板 URL...")
     try:
         sb.uc_open_with_reconnect(SERVER_URL, reconnect_time=5)
@@ -752,18 +775,173 @@ def click_coal_free(sb):
     handle_cloudflare(sb)
     wait_challenge_gone(sb, timeout=15)
 
-    if is_activate_server_page(sb):
-        print("❌ 仍停留在 Activate Your Server，COAL 激活未成功")
-        safe_screenshot(sb, "after_coal_click.png")
-        return False
+    # 若仍停在 Start Server 页，再补点一次
+    try:
+        body = sb.execute_script(
+            "return (document.body && document.body.innerText) ? document.body.innerText : '';"
+        ) or ""
+    except Exception:
+        body = ""
+    if start_server_visible(sb) or "start server" in body.lower():
+        ensure_location_selected(sb)
+        if click_start_server_button(sb):
+            print("✅ 最后补点 Start Server 成功")
+            time.sleep(5)
+            handle_cloudflare(sb)
+            try:
+                sb.uc_open_with_reconnect(SERVER_URL, reconnect_time=4)
+            except Exception:
+                sb.open(SERVER_URL)
+            time.sleep(3)
+            handle_cloudflare(sb)
 
-    print("✅ 已离开 Activate 页，视为进入面板")
+    if is_activate_server_page(sb) and not start_server_visible(sb):
+        if "start server" not in body.lower():
+            print("❌ 仍停留在 Activate 页，未能完成激活")
+            safe_screenshot(sb, "after_coal_click.png")
+            return False
+
+    print("✅ 激活流程结束，进入后续开机/续期")
     return True
 
 
+def start_server_visible(sb):
+    try:
+        return bool(
+            sb.execute_script(
+                r"""
+                var nodes = document.querySelectorAll('button, a, [role="button"]');
+                for (var i = 0; i < nodes.length; i++) {
+                    var t = (nodes[i].innerText || nodes[i].textContent || '').replace(/\s+/g, ' ').trim();
+                    if (/start\s*server/i.test(t)) {
+                        var r = nodes[i].getBoundingClientRect();
+                        if (r.width > 40 && r.height > 20) return true;
+                    }
+                }
+                return false;
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def ensure_location_selected(sb):
+    """Location 优先选 France，否则点 Germany / 第一个地点"""
+    try:
+        result = sb.execute_script(
+            r"""
+            var nodes = document.querySelectorAll('button, div, label, [role="button"]');
+            var france = null, germany = null;
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var t = (n.innerText || '').replace(/\s+/g, ' ').trim();
+                if (!t || t.length > 24) continue;
+                var r = n.getBoundingClientRect();
+                if (r.width < 50 || r.height < 28 || r.height > 100) continue;
+                if (/^france$/i.test(t)) france = n.closest('button') || n;
+                else if (/^germany$/i.test(t)) germany = n.closest('button') || n;
+            }
+            var target = france || germany;
+            if (!target) return null;
+            target.click();
+            return (target.innerText || '').replace(/\s+/g,' ').trim().slice(0, 30);
+            """
+        )
+        if result:
+            print(f"   Location 已选择/点击: {result}")
+            time.sleep(0.8)
+    except Exception as e:
+        print(f"   Location 选择跳过: {e}")
+
+
+def click_start_server_button(sb):
+    """点击页面底部的 Start Server 大按钮"""
+    for sel in [
+        'button:contains("Start Server")',
+        '//button[contains(., "Start Server")]',
+        '//*[self::button or @role="button"][contains(., "Start Server")]',
+    ]:
+        try:
+            if sb.is_element_visible(sel):
+                try:
+                    sb.uc_click(sel)
+                except Exception:
+                    sb.click(sel)
+                print(f"   点击 Start Server（{sel}）")
+                return True
+        except Exception:
+            continue
+
+    try:
+        box = sb.execute_script(
+            r"""
+            var nodes = document.querySelectorAll('button, a, [role="button"]');
+            var best = null;
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var t = (n.innerText || n.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!/start\s*server/i.test(t)) continue;
+                var r = n.getBoundingClientRect();
+                if (r.width < 80 || r.height < 30) continue;
+                var score = r.width + r.top / 10;
+                if (!best || score > best.score) {
+                    best = {x: r.left+r.width/2, y: r.top+r.height/2, w: r.width, h: r.height, text: t.slice(0,40), score: score};
+                }
+            }
+            return best ? JSON.stringify(best) : null;
+            """
+        )
+        if box:
+            info = json.loads(box)
+            print(
+                f"   定位 Start Server: «{info.get('text')}» "
+                f"{info.get('w'):.0f}x{info.get('h'):.0f} @ ({info.get('x'):.0f},{info.get('y'):.0f})"
+            )
+            if _cdp_click_xy(sb, float(info["x"]), float(info["y"])):
+                return True
+            sb.execute_script(
+                r"""
+                var x = arguments[0], y = arguments[1];
+                var el = document.elementFromPoint(x, y);
+                if (!el) return;
+                (el.closest('button') || el).click();
+                """,
+                float(info["x"]),
+                float(info["y"]),
+            )
+            return True
+    except Exception as e:
+        print(f"   Start Server JS/CDP 失败: {e}")
+    return False
+
+
 def ensure_not_on_activate_page(sb):
-    """若当前是选套餐页，先选 COAL Free 进入面板"""
-    if not is_activate_server_page(sb):
+    """若当前是选套餐页，先选 COAL Free；有 Start Server 则点；没有则跳过继续开机续期"""
+    if not is_activate_server_page(sb) and not start_server_visible(sb):
+        # 可能已在 Location/Start Server 页但标题不含 Activate
+        try:
+            body = sb.execute_script(
+                "return (document.body && document.body.innerText) ? document.body.innerText : '';"
+            ) or ""
+        except Exception:
+            body = ""
+        if "start server" not in body.lower() and "location" not in body.lower():
+            return True
+        if "start server" in body.lower():
+            print("🚀 直接检测到 Start Server 页（无 Activate 标题）")
+            ensure_location_selected(sb)
+            if click_start_server_button(sb):
+                print("✅ 已点击 Start Server")
+                time.sleep(4)
+                handle_cloudflare(sb)
+                try:
+                    sb.uc_open_with_reconnect(SERVER_URL, reconnect_time=4)
+                except Exception:
+                    sb.open(SERVER_URL)
+                time.sleep(3)
+                handle_cloudflare(sb)
+            return True
         return True
     return click_coal_free(sb)
 
@@ -1516,7 +1694,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v12.6")
+    print("🚀 启动 SkyMC 自动续期脚本 v12.7")
     print(f"目标服务器: {SERVER_URL}")
 
     start_singbox_from_node_link()
