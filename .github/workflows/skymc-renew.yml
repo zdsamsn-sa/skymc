@@ -20,7 +20,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install seleniumbase requests
+          # 钉死 seleniumbase==4.57.1：seleniumbase 4.58.0 破坏 UC 浏览器启动，4.57.1 为最后可用版本
+          pip install "seleniumbase==4.57.1" requests
           seleniumbase install chromedriver
 
       - name: 安装虚拟显示 (Xvfb)
