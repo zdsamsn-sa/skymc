@@ -1141,7 +1141,7 @@ def read_archive_expiry(sb):
                 except Exception as e: pass
             
         print("   归档到期时间未读到")
-    return None
+        return None
 
 
 def format_expiry(dt):
