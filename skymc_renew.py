@@ -1120,7 +1120,7 @@ def read_archive_expiry(sb):
                                 dt = datetime.fromisoformat(ts)
                                 if dt.tzinfo is None:
                                                     dt = dt.replace(tzinfo=timezone.utc)
-                                            print(f"   归档到期（expireAt）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                        
                                 return dt
                 except Exception as e:
             print(f"   解析 expireAt 失败: {e}")
