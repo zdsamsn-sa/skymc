@@ -1149,7 +1149,7 @@ def format_expiry(dt):
 
 
 def format_remaining(val):
-        if not val:
+    if not val:
                     return ""
     return str(val)
 
