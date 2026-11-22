@@ -1804,9 +1804,9 @@ def main():
             return
 
         open_server_panel(sb)
-                before = read_panel_info(sb)
-                dump_panel_dom(sb)
-                expiry_before = read_archive_expiry(sb)
+        before = read_panel_info(sb)
+        dump_panel_dom(sb)
+        expiry_before = read_archive_expiry(sb)
 
         started_ok, start_msg = ensure_server_running(sb, before)
         after_start = read_panel_info(sb)
