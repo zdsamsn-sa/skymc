@@ -1151,7 +1151,7 @@ def format_expiry(dt):
 def format_remaining(val):
         if not val:
                     return ""
-                return str(val)
+    return str(val)
 
 
 def remaining_to_seconds(val):
