@@ -365,6 +365,21 @@ def dump_panel_dom(sb):
         print(f"⚠️ 保存面板 DOM 失败: {e}")
     safe_screenshot(sb, "panel.png")
 
+def dump_subscription_page(sb):
+    """打开 Subscription 页并存档 DOM 与截图：排查续期入口"""
+    try:
+        sb.open(f"{SERVER_URL}/subscription")
+        time.sleep(3)
+        handle_cloudflare(sb)
+        wait_challenge_gone(sb, timeout=15)
+        html = sb.get_page_source() or ""
+        with open("sub_dom.html", "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📄 已保存 Subscription 页 DOM: sub_dom.html ({len(html)} 字节)")
+    except Exception as e:
+        print(f"⚠️ 保存 Subscription 页 DOM 失败: {e}")
+    safe_screenshot(sb, "sub.png")
+
 
 def js_set_value(sb, selectors, value):
     script = """
@@ -1805,6 +1820,7 @@ def main():
         if not renew_ok and os.path.exists("renew_not_found.png"):
             img = "renew_not_found.png"
         send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
+        dump_subscription_page(sb)
 
     print("🏁 脚本执行完毕")
 
