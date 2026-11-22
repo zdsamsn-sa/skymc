@@ -380,6 +380,39 @@ def dump_subscription_page(sb):
         print(f"⚠️ 保存 Subscription 页 DOM 失败: {e}")
     safe_screenshot(sb, "sub.png")
 
+def dump_upgrade_page(sb):
+    """点开边栏 Upgrade 按钮并存档打开后的 DOM 与截图：排查续期入口（只看不买）"""
+    try:
+        open_server_panel(sb)
+        clicked = sb.execute_script(
+            r"""
+            var nodes = document.querySelectorAll('button, a, [role="button"]');
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var t = (n.innerText || n.textContent || '').replace(/\s+/g, ' ').trim();
+                if (t !== 'Upgrade') continue;
+                var r = n.getBoundingClientRect();
+                if (r.width < 5 || r.height < 5) continue;
+                var st = window.getComputedStyle(n);
+                if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') continue;
+                n.click();
+                return 'clicked';
+            }
+            return null;
+            """
+        )
+        print(f"🔼 Upgrade 按钮点击结果: {clicked}")
+        time.sleep(3)
+        handle_cloudflare(sb)
+        wait_challenge_gone(sb, timeout=15)
+        html = sb.get_page_source() or ""
+        with open("up_dom.html", "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📄 已保存 Upgrade 打开后 DOM: up_dom.html ({len(html)} 字节)")
+    except Exception as e:
+        print(f"⚠️ 保存 Upgrade 打开后 DOM 失败: {e}")
+    safe_screenshot(sb, "up.png")
+
 
 def js_set_value(sb, selectors, value):
     script = """
@@ -1821,6 +1854,7 @@ def main():
             img = "renew_not_found.png"
         send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
         dump_subscription_page(sb)
+        dump_upgrade_page(sb)
 
     print("🏁 脚本执行完毕")
 
