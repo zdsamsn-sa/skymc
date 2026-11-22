@@ -1151,7 +1151,7 @@ def format_expiry(dt):
 def format_remaining(val):
         if not val:
                     return s
-                s = str(val).strip().lower()
+    s = str(val).strip().lower()
     try:
                 if s.endswith("m") and s[:-1].isdigit():
                                 mins = int(s[:-1])
