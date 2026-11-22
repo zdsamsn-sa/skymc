@@ -17,6 +17,7 @@ import base64
 import shutil
 import socket
 import subprocess
+from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs, unquote
 import requests
 from seleniumbase import SB
@@ -1103,22 +1104,65 @@ def read_panel_info(sb):
     return info
 
 
-def format_remaining(val):
-    if not val:
-        return "未读到"
-    s = str(val).strip()
-    # 新格式：59m / 120m
-    if s.endswith("m") and s[:-1].isdigit():
-        mins = int(s[:-1])
-        return f"{mins}分钟（Expires in {mins}m）"
-    parts = s.split(":")
+def read_archive_expiry(sb):
+        """读服务器归档到期时间：优先内嵌数据里的 expireAt，读不到再读 ARCHIVE DATE 卡片。
+            返回 UTC datetime，读不到返回 None。
+                注意：不要把“启动 + 24 小时”之类的公式写死，只记录实测的 before/after，
+                    公式等 1-2 轮记录后再钉。"""
+        try:
+                    html = sb.get_page_source() or ""
+    except Exception:
+        html = ""
+    m = re.search(r'expireAt\s*:\s*"([^"]+)"', html)
+    if m:
+                try:
+                                ts = m.group(1).replace("Z", "+00:00")
+                                dt = datetime.fromisoformat(ts)
+                                if dt.tzinfo is None:
+                                                    dt = dt.replace(tzinfo=timezone.utc)
+                                                print(f"   归档到期（expireAt）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                                return dt
+                except Exception as e:
+            print(f"   解析 expireAt 失败: {e}")
+    # 兜底：ARCHIVE DATE 卡片， "25 Kas 2026 04:45"（Kas = 土耳其语 11 月；卡片时间与 expireAt 一致， 按 UTC 计）
     try:
+                text = sb.execute_script("return (document.body && document.body.innerText) ? document.body.innerText : '';") or ""
+    except Exception:
+            text = ""
+    months = {"Oca": 1, "Şub": 2, "Mar": 3, "Nis": 4, "May": 5, "Haz": 6,
+                              "Tem": 7, "Ağu": 8, "Eyl": 9, "Eki": 10, "Kas": 11, "Ara": 12}
+    m2 = re.search(r'(\d{1,2})\s+(Oca|Şub|Mar|Nis|May|Haz|Tem|Ağu|Eyl|Eki|Kas|Ara)\s+(\d{4})\s+(\d{1,2}):(\d{2})', text)
+    if m2:
+                try:
+                                dt = datetime(int(m2.group(3)), months[m2.group(2)], int(m2.group(1)),
+                                                                                  int(m2.group(4)), int(m2.group(5)), tzinfo=timezone.utc)
+                                print(f"   归档到期（ARCHIVE DATE 卡片）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                                return dt
+                except Exception as e:
+            print(f"   解析 ARCHIVE DATE 卡片失败: {e}")
+    print("   归档到期时间未读到")
+    return None
+
+
+def format_expiry(dt):
+        return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else "未读到"
+
+
+def format_remaining(val):
+        if not val:
+                    return s
+                s = str(val).strip().lower()
+    try:
+                if s.endswith("m") and s[:-1].isdigit():
+                                mins = int(s[:-1])
+                                return f"{mins}分钟（Expires in {mins}m）")
+                            parts = s.split(":")
         if len(parts) == 2:
-            m, sec = int(parts[0]), int(parts[1])
-            return f"{s}（{m}分钟{sec}秒）"
-        if len(parts) == 3:
-            h, m, sec = int(parts[0]), int(parts[1]), int(parts[2])
-            return f"{s}（{h}小时{m}分{sec}秒）"
+                        m, sec = int(parts[0]), int(parts[1])
+                        return f"{s}（{m}分钟{sec}秒）")
+                    if len(parts) == 3:
+                                    h, m, sec = int(parts[0]), int(parts[1]), int(parts[2])
+                                    return f"{s}（{h}小时{m}分{sec}秒）")
     except Exception:
         pass
     return s
@@ -1753,7 +1797,7 @@ def main():
         print("❌ 请设置环境变量 SKYMC_EMAIL 和 SKYMC_PASSWORD")
         sys.exit(1)
 
-    print("🚀 启动 SkyMC 自动续期脚本 v12.7")
+    print("🚀 启动 SkyMC 自动续期脚本 v12.8")
     print(f"目标服务器: {SERVER_URL}")
 
     start_singbox_from_node_link()
@@ -1774,23 +1818,22 @@ def main():
             return
 
         open_server_panel(sb)
-        before = read_panel_info(sb)
-        dump_panel_dom(sb)
-        before_time = before.get("remaining")
-        print(f"⏱ 续期前剩余时间: {format_remaining(before_time)}")
+                before = read_panel_info(sb)
+                dump_panel_dom(sb)
+                expiry_before = read_archive_expiry(sb)
 
         started_ok, start_msg = ensure_server_running(sb, before)
         after_start = read_panel_info(sb)
 
         if not started_ok:
-            print("⚠️ 服务器未进入 Online，跳过续期，避免找不到 Renew")
+            print("⚠️ 服务器未进入 Online，续期失败")
             safe_screenshot(sb, "final_result.png")
             msg = (
-                f"❌ 续期跳过：服务器未 Online\n"
+                f"❌ 续期失败：服务器未 Online\n"
                 f"服务器: {SERVER_ID}\n"
                 f"当前状态: {(after_start.get('status') or 'unknown')}\n"
                 f"启动操作: {start_msg}\n"
-                f"续期前时间: {format_remaining(before_time)}\n"
+                f"归档到期（拉起前）: {format_expiry(expiry_before)}\n"
                 f"IP: {current_ip}"
             )
             print(msg)
@@ -1798,61 +1841,44 @@ def main():
             print("🏁 脚本执行完毕")
             return
 
-        # Online 后确认侧边栏 Expires 入口（新 UI 的续期入口）
-        if not after_start.get("hasExpires") and not after_start.get("hasRenew"):
-            print("⏳ Online 但尚未看到 Expires/Renew 入口，再等待最多 60 秒...")
-            end_wait = time.time() + 60
-            while time.time() < end_wait:
-                time.sleep(5)
-                after_start = read_panel_info(sb)
-                if after_start.get("hasExpires") or after_start.get("hasRenew"):
-                    break
-            if not after_start.get("hasExpires") and not after_start.get("hasRenew"):
-                print("   仍未检测到 Expires/Renew，仍将尝试点击")
+        # 新机制：面板上没有 Renew/Expires 入口可点了。续期 = 把服务器拉到 Online，
+                # 归档日随之往后推；这里只等归档到期时间刷新后重读，再按 before/after 判定。
+                print("⏳ 等待约 60 秒，让归档到期时间刷新...")
+                time.sleep(60)
+                handle_cloudflare(sb)
+                wait_challenge_gone(sb, timeout=15)
+                after = read_panel_info(sb)
+                expiry_after = read_archive_expiry(sb)
 
-        print("\n📄 开始续期流程（服务器已 Online）...")
-        print("   入口：侧边栏 Expires in XXm → 菜单 Renew")
-        renew_ok = click_renew(sb)
+        now = datetime.now(timezone.utc)
+                status_now = after.get("status") or after_start.get("status") or "unknown"
+                was_already_online = (before.get("status") or "").lower() == "online"
+                if expiry_after is not None and expiry_after >= (expiry_before or expiry_after) and expiry_after > now:
+                                ok = True
+                                verdict = "归档日已确认在未来，续期有效"
+                elif was_already_online and expiry_after is not None and expiry_after > now and (expiry_after - now).total_seconds() >= 12 * 3600:
+                                ok = True
+                                verdict = "进场已 Online、归档日未动但仍在 12 小时以上，无需重启"
+                else:
+                                ok = False
+                                verdict = "归档到期时间未确认或提前，请人工核对截图"
 
-        print("⏳ 等待续期结果刷新...")
-        time.sleep(5)
-        handle_cloudflare(sb)
-        wait_challenge_gone(sb, timeout=15)
-        after = read_panel_info(sb)
-        after_time = after.get("remaining")
-        print(f"⏱ 续期后剩余时间: {format_remaining(after_time)}")
+                safe_screenshot(sb, "final_result.png")
 
-        safe_screenshot(sb, "final_result.png")
-
-        before_sec = remaining_to_seconds(before_time)
-        after_sec = remaining_to_seconds(after_time)
-        time_note = "无法对比（有一侧未读到时间）"
-        if before_sec is not None and after_sec is not None:
-            delta = after_sec - before_sec
-            if delta > 30:
-                time_note = f"倒计时已增加约 {delta} 秒，续期生效"
-            elif delta >= -5:
-                time_note = "倒计时变化很小，可能刚续过或尚未刷新"
-            else:
-                time_note = "倒计时未增加，请人工核对截图"
-
-        status_now = after.get("status") or after_start.get("status") or "unknown"
-        lines = [
-            f"{'✅' if renew_ok else '❌'} 续期{'已执行' if renew_ok else '失败'}",
-            f"服务器: {SERVER_ID}",
-            f"当前状态: {status_now}",
-            f"启动操作: {start_msg}",
-            f"续期前时间: {format_remaining(before_time)}",
-            f"续期后时间: {format_remaining(after_time)}",
-            f"结论: {time_note}",
-            f"IP: {current_ip}",
-        ]
-        msg = "\n".join(lines)
-        print("\n" + msg)
-        img = "final_result.png" if os.path.exists("final_result.png") else None
-        if not renew_ok and os.path.exists("renew_not_found.png"):
-            img = "renew_not_found.png"
-        send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
+                lines = [
+                                f"{'✅' if ok else '❌'} 续期{'有效' if ok else '失败'}",
+                                f"服务器: {SERVER_ID}",
+                                f"当前状态: {status_now}",
+                                f"启动操作: {start_msg}",
+                                f"归档到期（拉起前）: {format_expiry(expiry_before)}",
+                                f"归档到期（拉起后）: {format_expiry(expiry_after)}",
+                                f"结论: {verdict}",
+                                f"IP: {current_ip}",
+                ]
+                msg = "\n".join(lines)
+                print("\n" + msg)
+                img = "final_result.png" if os.path.exists("final_result.png") else None
+                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
         dump_subscription_page(sb)
         dump_upgrade_page(sb)
 
