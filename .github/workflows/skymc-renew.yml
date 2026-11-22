@@ -57,4 +57,5 @@ jobs:
           path: |
             *.png
             panel_dom.html
+            sub_dom.html
           if-no-files-found: ignore
