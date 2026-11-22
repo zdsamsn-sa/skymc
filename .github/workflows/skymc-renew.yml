@@ -49,10 +49,12 @@ jobs:
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" python skymc_renew.py
 
-      - name: 上传截图
+      - name: 上传截图与面板 DOM
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: renew-screenshots
-          path: "*.png"
+          path: |
+            *.png
+            panel_dom.html
           if-no-files-found: ignore
