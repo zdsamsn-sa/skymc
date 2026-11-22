@@ -1111,7 +1111,7 @@ def read_archive_expiry(sb):
                     公式等 1-2 轮记录后再钉。"""
         try:
                     html = sb.get_page_source() or ""
-    except Exception:
+        except Exception:
         html = ""
     m = re.search(r'expireAt\s*:\s*"([^"]+)"', html)
     if m:
@@ -1127,7 +1127,7 @@ def read_archive_expiry(sb):
     # 兜底：ARCHIVE DATE 卡片， "25 Kas 2026 04:45"（Kas = 土耳其语 11 月；卡片时间与 expireAt 一致， 按 UTC 计）
     try:
                 text = sb.execute_script("return (document.body && document.body.innerText) ? document.body.innerText : '';") or ""
-    except Exception:
+            except Exception:
             text = ""
     months = {"Oca": 1, "Şub": 2, "Mar": 3, "Nis": 4, "May": 5, "Haz": 6,
                               "Tem": 7, "Ağu": 8, "Eyl": 9, "Eki": 10, "Kas": 11, "Ara": 12}
