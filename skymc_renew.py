@@ -1149,10 +1149,10 @@ def format_expiry(dt):
 
 
 def format_remaining(val):
-        if not val:
-                    return s
+    if not val:
+        return s
     s = str(val).strip().lower()
-    try:
+      try:
                 if s.endswith("m") and s[:-1].isdigit():
                                 mins = int(s[:-1])
                                 return f"{mins}分钟（Expires in {mins}m）")
