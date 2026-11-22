@@ -354,6 +354,17 @@ def safe_screenshot(sb, path):
     print(f"📸 已保存截图: {path}")
     return path
 
+def dump_panel_dom(sb):
+    """登录成功后面板 DOM 存档：供排查 Renew 入口用"""
+    try:
+        html = sb.get_page_source() or ""
+        with open("panel_dom.html", "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"📄 已保存面板 DOM: panel_dom.html ({len(html)} 字节)")
+    except Exception as e:
+        print(f"⚠️ 保存面板 DOM 失败: {e}")
+    safe_screenshot(sb, "panel.png")
+
 
 def js_set_value(sb, selectors, value):
     script = """
@@ -1716,6 +1727,7 @@ def main():
 
         open_server_panel(sb)
         before = read_panel_info(sb)
+        dump_panel_dom(sb)
         before_time = before.get("remaining")
         print(f"⏱ 续期前剩余时间: {format_remaining(before_time)}")
 
