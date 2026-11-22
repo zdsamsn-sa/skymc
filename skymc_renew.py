@@ -1122,8 +1122,8 @@ def read_archive_expiry(sb):
                                                     dt = dt.replace(tzinfo=timezone.utc)
                         
                                 return dt
-                except Exception as e:
-            print(f"   解析 expireAt 失败: {e}")
+                except Exception as e: pass
+            
     # 兜底：ARCHIVE DATE 卡片， "25 Kas 2026 04:45"（Kas = 土耳其语 11 月；卡片时间与 expireAt 一致， 按 UTC 计）
         try:
                 text = sb.execute_script("return (document.body && document.body.innerText) ? document.body.innerText : '';") or ""
@@ -1138,8 +1138,8 @@ def read_archive_expiry(sb):
                                                                                   int(m2.group(4)), int(m2.group(5)), tzinfo=timezone.utc)
                                 print(f"   归档到期（ARCHIVE DATE 卡片）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                                 return dt
-                except Exception as e:
-            print(f"   解析 ARCHIVE DATE 卡片失败: {e}")
+                except Exception as e: pass
+            
         print("   归档到期时间未读到")
     return None
 
