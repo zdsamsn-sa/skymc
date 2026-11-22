@@ -1829,46 +1829,46 @@ def main():
 
         # 新机制：面板上没有 Renew/Expires 入口可点了。续期 = 把服务器拉到 Online，
                 # 归档日随之往后推；这里只等归档到期时间刷新后重读，再按 before/after 判定。
-                print("⏳ 等待约 60 秒，让归档到期时间刷新...")
-                time.sleep(60)
-                handle_cloudflare(sb)
-                wait_challenge_gone(sb, timeout=15)
-                after = read_panel_info(sb)
-                expiry_after = read_archive_expiry(sb)
+        print("⏳ 等待约 60 秒，让归档到期时间刷新...")
+        time.sleep(60)
+        handle_cloudflare(sb)
+        wait_challenge_gone(sb, timeout=15)
+        after = read_panel_info(sb)
+        expiry_after = read_archive_expiry(sb)
 
         now = datetime.now(timezone.utc)
-                status_now = after.get("status") or after_start.get("status") or "unknown"
-                was_already_online = (before.get("status") or "").lower() == "online"
-                if expiry_after is not None and expiry_after >= (expiry_before or expiry_after) and expiry_after > now:
-                                ok = True
-                                verdict = "归档日已确认在未来，续期有效"
-                elif was_already_online and expiry_after is not None and expiry_after > now and (expiry_after - now).total_seconds() >= 12 * 3600:
-                                ok = True
-                                verdict = "进场已 Online、归档日未动但仍在 12 小时以上，无需重启"
-                else:
-                                ok = False
-                                verdict = "归档到期时间未确认或提前，请人工核对截图"
+        status_now = after.get("status") or after_start.get("status") or "unknown"
+        was_already_online = (before.get("status") or "").lower() == "online"
+        if expiry_after is not None and expiry_after >= (expiry_before or expiry_after) and expiry_after > now:
+            ok = True
+            verdict = "归档日已确认在未来，续期有效"
+        elif was_already_online and expiry_after is not None and expiry_after > now and (expiry_after - now).total_seconds() >= 12 * 3600:
+            ok = True
+            verdict = "进场已 Online、归档日未动但仍在 12 小时以上，无需重启"
+        else:
+            ok = False
+            verdict = "归档到期时间未确认或提前，请人工核对截图"
 
-                safe_screenshot(sb, "final_result.png")
+        safe_screenshot(sb, "final_result.png")
 
-                lines = [
-                                f"{'✅' if ok else '❌'} 续期{'有效' if ok else '失败'}",
-                                f"服务器: {SERVER_ID}",
-                                f"当前状态: {status_now}",
-                                f"启动操作: {start_msg}",
-                                f"归档到期（拉起前）: {format_expiry(expiry_before)}",
-                                f"归档到期（拉起后）: {format_expiry(expiry_after)}",
-                                f"结论: {verdict}",
-                                f"IP: {current_ip}",
-                ]
-                msg = "\n".join(lines)
-                print("\n" + msg)
-                img = "final_result.png" if os.path.exists("final_result.png") else None
-                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
+        lines = [
+            f"{'✅' if ok else '❌'} 续期{'有效' if ok else '失败'}",
+            f"服务器: {SERVER_ID}",
+            f"当前状态: {status_now}",
+            f"启动操作: {start_msg}",
+            f"归档到期（拉起前）: {format_expiry(expiry_before)}",
+            f"归档到期（拉起后）: {format_expiry(expiry_after)}",
+            f"结论: {verdict}",
+            f"IP: {current_ip}",
+        ]
+        msg = "\n".join(lines)
+        print("\n" + msg)
+        img = "final_result.png" if os.path.exists("final_result.png") else None
+        send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg, image_path=img)
         dump_subscription_page(sb)
         dump_upgrade_page(sb)
 
-    print("🏁 脚本执行完毕")
+        print("🏁 脚本执行完毕")
 
 
 if __name__ == "__main__":
