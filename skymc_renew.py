@@ -1113,26 +1113,26 @@ def read_archive_expiry(sb):
                     html = sb.get_page_source() or ""
         except Exception:
             html = ""
-    m = re.search(r'expireAt\s*:\s*"([^"]+)"', html)
-    if m:
+            m = re.search(r'expireAt\s*:\s*"([^"]+)"', html)
+            if m:
                 try:
                                 ts = m.group(1).replace("Z", "+00:00")
                                 dt = datetime.fromisoformat(ts)
                                 if dt.tzinfo is None:
                                                     dt = dt.replace(tzinfo=timezone.utc)
-                                                print(f"   归档到期（expireAt）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                                            print(f"   归档到期（expireAt）: {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
                                 return dt
                 except Exception as e:
             print(f"   解析 expireAt 失败: {e}")
     # 兜底：ARCHIVE DATE 卡片， "25 Kas 2026 04:45"（Kas = 土耳其语 11 月；卡片时间与 expireAt 一致， 按 UTC 计）
-    try:
+        try:
                 text = sb.execute_script("return (document.body && document.body.innerText) ? document.body.innerText : '';") or ""
             except Exception:
             text = ""
         months = {"Oca": 1, "Şub": 2, "Mar": 3, "Nis": 4, "May": 5, "Haz": 6,
-                              "Tem": 7, "Ağu": 8, "Eyl": 9, "Eki": 10, "Kas": 11, "Ara": 12}
-    m2 = re.search(r'(\d{1,2})\s+(Oca|Şub|Mar|Nis|May|Haz|Tem|Ağu|Eyl|Eki|Kas|Ara)\s+(\d{4})\s+(\d{1,2}):(\d{2})', text)
-    if m2:
+                                  "Tem": 7, "Ağu": 8, "Eyl": 9, "Eki": 10, "Kas": 11, "Ara": 12}
+            m2 = re.search(r'(\d{1,2})\s+(Oca|Şub|Mar|Nis|May|Haz|Tem|Ağu|Eyl|Eki|Kas|Ara)\s+(\d{4})\s+(\d{1,2}):(\d{2})', text)
+            if m2:
                 try:
                                 dt = datetime(int(m2.group(3)), months[m2.group(2)], int(m2.group(1)),
                                                                                   int(m2.group(4)), int(m2.group(5)), tzinfo=timezone.utc)
@@ -1140,7 +1140,7 @@ def read_archive_expiry(sb):
                                 return dt
                 except Exception as e:
             print(f"   解析 ARCHIVE DATE 卡片失败: {e}")
-    print("   归档到期时间未读到")
+        print("   归档到期时间未读到")
     return None
 
 
