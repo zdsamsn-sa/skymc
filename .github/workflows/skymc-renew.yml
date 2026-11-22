@@ -58,4 +58,5 @@ jobs:
             *.png
             panel_dom.html
             sub_dom.html
+            up_dom.html
           if-no-files-found: ignore
